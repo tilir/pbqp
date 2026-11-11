@@ -18,7 +18,7 @@ NODE 0 d_0
 NODE N-1 d_(N-1)
 <d_(N-1) costs>
 EDGE src tgt
-<d_i * d_j costs>
+<d_src * d_tgt costs>
 ...
 END
 ```
@@ -60,6 +60,18 @@ The solver adds unary costs in node ID order, then pairwise costs in stored
 edge order. Rounding and arithmetic overflow follow the platform's float
 behavior. Arithmetic overflow does not return `PBQP_OVERFLOW`. A tuple
 containing an explicit `INF` term is infeasible regardless of its other costs.
+
+`PBQP_SOLUTION_OPTIMAL` means minimal under this sequential float evaluation
+order, not under the exact real sum of the stored floats. For example, in
+binary32 round-to-nearest arithmetic, both `16777216 + 1 - 16777216` and
+`16777216 + 0 - 16777216` evaluate to zero. The exhaustive solver therefore
+keeps the first of these tied assignments, although their exact sums differ.
+Changing the summation order may change which assignment is best.
+
+`pbqp_evaluate_assignment` checks indices and evaluates an assignment under
+this common policy. Its `is_feasible` output distinguishes an explicit INF
+term from an allowed assignment whose sum overflows to infinity. A forbidden
+assignment is not proof that the entire problem is infeasible.
 
 All whitespace characters are equivalent. Line breaks in vectors and matrices
 are for readability only. A comment starts with `#` and extends to the end of

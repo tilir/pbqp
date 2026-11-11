@@ -66,7 +66,9 @@ typedef enum pbqp_status {
   PBQP_OVERFLOW,
   /* Proven absence of any feasible assignment. Failure to find an
    * assignment without a proof must never be reported as this status. */
-  PBQP_INFEASIBLE
+  PBQP_INFEASIBLE,
+  /* Search ended without an assignment or a proof of infeasibility. */
+  PBQP_NO_SOLUTION
 } pbqp_status;
 
 /* Ordinary floating-point addition, with the platform's rounding and
@@ -94,7 +96,8 @@ typedef struct pbqp_error {
 typedef enum pbqp_solution_quality {
   /* A feasible assignment, without a proof of optimality. */
   PBQP_SOLUTION_FEASIBLE = 0,
-  /* A feasible assignment with proven optimality. */
+  /* Proven optimal under the reference sequential float evaluation order,
+   * not necessarily under exact real arithmetic. */
   PBQP_SOLUTION_OPTIMAL
 } pbqp_solution_quality;
 
@@ -107,6 +110,13 @@ typedef struct pbqp_solution {
   size_t num_nodes;
   size_t *options;
 } pbqp_solution;
+
+typedef struct pbqp_evaluation {
+  pbqp_cost_t cost;
+  /* Zero for an assignment selecting an explicit INF term; otherwise one.
+   * A feasible assignment can still have an infinite accumulated cost. */
+  int is_feasible;
+} pbqp_evaluation;
 
 /* Reads a complete file at the null-terminated path. Only whitespace/comments
  * may follow END. On success, transfers ownership of the problem and all its
@@ -149,12 +159,28 @@ pbqp_status pbqp_write(const char *path, const pbqp_problem *problem,
  * this contract; a separate validation call is optional. */
 pbqp_status pbqp_validate(const pbqp_problem *problem, pbqp_error *error);
 
+/* Validates the problem and option indices, borrowing all inputs without
+ * modification. num_nodes must match problem->num_nodes; options may be NULL
+ * only for an empty problem. The caller supplies at least num_nodes entries.
+ * out must not be NULL and is cleared on failure. error may be NULL.
+ * PBQP_OK means evaluation succeeded, including forbidden assignments:
+ * is_feasible is then zero and cost is PBQP_INF. It does not prove that the
+ * problem is infeasible. An allowed assignment whose sum overflows to infinity
+ * instead has is_feasible == 1. Never returns PBQP_INFEASIBLE.
+ * Reference evaluation adds all unary costs in node ID order, then pairwise
+ * costs in stored edge order, using pbqp_cost_add. OPTIMAL is defined relative
+ * to these sequentially rounded values. Regrouping arithmetic can change the
+ * ordering of assignments and cannot by itself establish this quality. */
+pbqp_status pbqp_evaluate_assignment(const pbqp_problem *problem,
+                                     const size_t *options, size_t num_nodes,
+                                     pbqp_evaluation *out, pbqp_error *error);
+
 /* Releases a problem and all its arrays. Only accepts NULL or an unmodified
  * object returned by pbqp_read. Never pass a caller-owned problem view. */
 void pbqp_problem_free(pbqp_problem *problem);
 
 /* Releases a solution and its owned options array. Only accepts NULL or an
- * object returned by pbqp_solve_bruteforce with its original options pointer.
+ * object returned by a public solver with its original options pointer.
  */
 void pbqp_solution_free(pbqp_solution *solution);
 
@@ -175,6 +201,40 @@ void pbqp_solution_free(pbqp_solution *solution);
  * No pruning assumptions are made about negative costs. */
 pbqp_status pbqp_solve_bruteforce(const pbqp_problem *problem,
                                   pbqp_solution **out, pbqp_error *error);
+
+/* Called synchronously after each completed integer percentage, from 1
+ * through 100, at most once per percentage. Several percentages may complete
+ * on one tuple for small search spaces. user_data is borrowed for the call.
+ * A callback must not throw exceptions or modify the problem or its arrays. */
+typedef void (*pbqp_progress_callback)(unsigned percent, void *user_data);
+
+/* Same solver and ownership contract as pbqp_solve_bruteforce, with optional
+ * progress reporting. A NULL callback disables reporting. Percentages count
+ * all enumerated tuples, including forbidden ones; threshold p is reached
+ * after ceil(p * product(num_options) / 100) completed tuples. The first
+ * callback is never sent at zero progress. Full search reports 100 even when
+ * it proves infeasibility. Errors before enumeration invoke no callbacks.
+ * Reporting does not change the tuple order, evaluation policy, or quality. */
+pbqp_status pbqp_solve_bruteforce_with_progress(const pbqp_problem *problem,
+                                                pbqp_progress_callback progress,
+                                                void *user_data,
+                                                pbqp_solution **out,
+                                                pbqp_error *error);
+
+/* Validates and borrows inputs with the same ownership rules as brute force.
+ * Visits nodes by descending (maximum - minimum) finite unary cost, breaking
+ * ties by node ID. In regalloc problems this prioritizes expensive spills.
+ * Selects the first allowed option minimizing its unary cost plus edges to
+ * already assigned nodes, in stored edge order. Both edge orientations are
+ * respected regardless of the endpoint assignment order.
+ * No backtracking or optimality proof is attempted. On PBQP_OK, *out owns an
+ * independent options array, quality is PBQP_SOLUTION_FEASIBLE, and cost uses
+ * the reference evaluation order. The empty problem succeeds with cost zero.
+ * A dead end returns PBQP_NO_SOLUTION, never PBQP_INFEASIBLE, even if the
+ * problem happens to be infeasible. Sets *out to NULL on failure.
+ * error may be NULL. */
+pbqp_status pbqp_solve_greedy(const pbqp_problem *problem, pbqp_solution **out,
+                              pbqp_error *error);
 
 #ifdef __cplusplus
 }

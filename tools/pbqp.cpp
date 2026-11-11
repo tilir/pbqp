@@ -24,24 +24,39 @@ import pbqp.command_line;
 namespace {
 void help() {
   std::cout
-      << "Usage: pbqp --solve=SOLVER INPUT\n"
+      << "Usage: pbqp --solve=SOLVER [--heartbeat] INPUT\n"
          "       pbqp --help\n\n"
+         "  --heartbeat  Print one dot per completed percent to stderr (naive "
+         "only).\n\n"
          "Solvers:\n"
-         "  naive  Exhaustive search; proves optimality or infeasibility.\n";
+         "  naive   Exhaustive search; proves optimality or infeasibility.\n"
+         "  greedy  Cost-priority heuristic; returns a feasible, possibly "
+         "suboptimal solution.\n";
+}
+void heartbeat(unsigned percent, void *) noexcept {
+  std::cerr.put('.');
+  if (percent == 100)
+    std::cerr.put('\n');
+  std::cerr.flush();
 }
 } // namespace
 
 int main(int argc, char **argv) {
   try {
     constexpr std::string_view names[] = {"--solve"};
-    const pbqp_tools::Arguments arguments(argc, argv, names);
+    constexpr std::string_view flags[] = {"--heartbeat"};
+    const pbqp_tools::Arguments arguments(argc, argv, names, flags);
     if (arguments.help()) {
       help();
       return 0;
     }
     auto solver = arguments.require("--solve");
-    if (solver != "naive")
+    if (solver != "naive" && solver != "greedy")
       throw std::invalid_argument("unknown solver: " + std::string(solver));
+    bool report_progress = arguments.has("--heartbeat");
+    if (report_progress && solver != "naive")
+      throw std::invalid_argument(
+          "--heartbeat is supported only by the naive solver");
     if (arguments.positional().size() != 1)
       throw std::invalid_argument("expected exactly one input file");
 
@@ -56,7 +71,12 @@ int main(int argc, char **argv) {
                                                                   free_problem);
     if (status == PBQP_OK) {
       pbqp_solution *result = nullptr;
-      status = pbqp_solve_bruteforce(problem.get(), &result, &error);
+      auto solve =
+          solver == "naive" ? pbqp_solve_bruteforce : pbqp_solve_greedy;
+      status = report_progress
+                   ? pbqp_solve_bruteforce_with_progress(
+                         problem.get(), heartbeat, nullptr, &result, &error)
+                   : solve(problem.get(), &result, &error);
       const auto free_solution = [](pbqp_solution *s) noexcept {
         pbqp_solution_free(s);
       };
@@ -79,7 +99,7 @@ int main(int argc, char **argv) {
       if (error.line)
         std::cerr << "line " << error.line << ": ";
       std::cerr << error.message << '\n';
-      return status == PBQP_INFEASIBLE ? 2 : 1;
+      return status == PBQP_INFEASIBLE ? 2 : status == PBQP_NO_SOLUTION ? 3 : 1;
     }
   } catch (const std::exception &error) {
     std::cerr << error.what()

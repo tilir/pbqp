@@ -47,6 +47,18 @@
 
 ## Source layout
 
+- Root `CMakeLists.txt`: project setup, shared configuration, and subdirectories.
+- `src/CMakeLists.txt`, `tools/CMakeLists.txt`, `tests/CMakeLists.txt`: component
+  targets and test registration. Keep target source lists with their sources.
+- `include/CMakeLists.txt`: explicit public header list. Components reuse their
+  exact source lists for targets and formatting, register absolute paths through
+  `pbqp_register_format_sources`, and propagate `PBQP_FORMAT_SOURCES` to the root.
+  Do not use source globs. Create formatter targets only after collecting all
+  component lists. Tests register their files even with `BUILD_TESTING=OFF`.
+- `cmake/TargetOptions.cmake`: common C++23, module scanning, warnings, and
+  output-directory helpers. Keep executables and libraries at the build root
+  so documented commands remain valid. The C ABI test is still compiled as C.
+- `cmake/Formatting.cmake`: shared `format` and `check-format` targets.
 - `include/pbqp.h`: public types, inline cost algebra, API declarations, and
   contracts for validation, ownership, diagnostics, and solution quality.
 - `src/pbqp.cppm`: primary module interface with no exported internal names.
@@ -59,7 +71,16 @@
 - `src/error.cppm`: private `:error` partition with non-throwing diagnostics.
 - `src/failure.cppm`: private `:failure` partition for parsing/validation errors.
 - `src/ownership.cppm`: private `:ownership` partition with RAII aliases.
+- `src/evaluation.cppm`: shared reference evaluator for validated assignments.
+- `src/progress.cppm`: exact percentage boundaries for mixed-radix enumeration
+  without multiplying domain sizes into a fixed-width counter.
+- `src/solution.cpp`: public assignment evaluator and solution destruction.
 - `src/bruteforce.cpp`: exhaustive reference solver; uses no exceptions.
+- `src/greedy.cpp`: validation and ownership boundary for the greedy C API.
+- `src/greedy.cppm`: private `:greedy` partition with `GreedySearch`, separating
+  workspace allocation, node priorities, edge indexing, option scoring, and
+  assignment. Preparation allocates all search storage; `run` does not allocate,
+  backtrack, or claim optimality.
 - `tools/pbqp.cpp`: named solver selection and solver CLI.
 - `tools/command_line.cppm`: shared `pbqp.command_line` module for named options,
   help flags, duplicate detection, and positional input paths.
@@ -100,7 +121,8 @@ exceptions translated at the boundary. Do not add `-fno-exceptions`; modules
 use consistent compiler options. The solver itself must use status returns;
 do not add exceptions, allocation, or validation inside the tuple loop.
 
-For APIs with output pointers, set outputs to NULL on failure. A supplied
+For APIs returning owned objects, set output pointers to NULL on failure.
+Clear structured evaluation outputs on failure. A supplied
 `pbqp_error` needs no initialization. Its message must always be NUL-terminated;
 truncate diagnostics if needed. Success clears `line` and `message[0]`.
 Failures provide a diagnostic and a source line if known, otherwise zero.
@@ -115,6 +137,8 @@ infinity. Input costs may be finite or positive infinity; reject NaN and
 negative infinity. Arithmetic overflow follows floating-point behavior and
 does not return `PBQP_OVERFLOW`. That status remains useful for unrepresentable
 input numbers and sizes.
+Do not enable fast-math flags that discard infinity handling or permit
+reassociation of reference-order additions.
 
 Explicit INF terms forbid a tuple. Distinguish these from a feasible tuple
 whose sum overflows to infinity. Preserve reference summation order: unary
@@ -127,9 +151,28 @@ Execution status and result quality are separate. A solver's `PBQP_OK` returns
 a solution; inspect `quality` to distinguish `PBQP_SOLUTION_FEASIBLE` from
 `PBQP_SOLUTION_OPTIMAL`. The reference solver sets OPTIMAL after exhaustive
 search. `PBQP_INFEASIBLE` requires proof that no feasible assignment exists.
-A heuristic failing to find an assignment must not return it. Define a separate
-no-result status when introducing a solver that can stop without a solution
-or proof; do not conflate that outcome with infeasibility or success.
+A heuristic failing to find an assignment returns `PBQP_NO_SOLUTION`, never
+`PBQP_INFEASIBLE`. Greedy returns FEASIBLE even when it happens to find an
+optimum or solves the empty problem.
+
+`pbqp_evaluate_assignment` validates inputs and indices, then reports both a
+reference-order cost and an independent `is_feasible` flag. A forbidden tuple
+is reported successfully with `is_feasible == 0`, not as problem-level
+infeasibility. Both solvers use its shared internal evaluator for reported
+costs. OPTIMAL refers only to this sequentially rounded evaluation policy,
+not an exact real sum. Regrouping float arithmetic can change the optimum;
+merely recomputing the final assignment's cost does not prove optimality.
+
+Greedy visits nodes by descending finite unary cost range (maximum minus
+minimum), with node ID as the tie-breaker. For regalloc this is descending
+spill cost. It scores unary costs plus edges to already assigned nodes in
+stored edge order and keeps the first minimum allowed option. Respect source
+rows and target columns even when the target is assigned before the source.
+Edge indices are sorted once by the assignment step of their later endpoint
+and then original edge index, so sparse search does not rescan every edge for
+every node. Allocate scratch storage before the node/option loops. A dead end
+terminates with NO_SOLUTION. On example 2, greedy must color nodes 1, 3, and 5
+before spilling node 4, for total cost 40; its result quality remains FEASIBLE.
 
 Input accepts decimal fractions and scientific notation. Keep the classic
 locale for serialization and use `max_digits10` precision so finite float
@@ -145,24 +188,54 @@ reusable generator library; `pbqp_generate` is its CLI. Both tools link the
 shared `pbqp_command_line` library for argument parsing.
 
 Invoke the solver as `pbqp --solve=naive INPUT`. `pbqp --help` lists available
-solvers; currently `naive` selects the exhaustive reference solver. Do not
+solvers: `naive` selects exhaustive search, `greedy` selects the heuristic. Do not
 reintroduce `solve` or `dump` positional subcommands. Problem dumping remains
 available to library users through `pbqp_write`.
+`--heartbeat` is a valueless flag for `naive`. It writes one flushed dot to
+stderr for each completed integer percentage, from 1 through 100, followed by
+a newline at completion. Count all tuples, including forbidden assignments.
+The first dot is emitted after ceil(total / 100) visited tuples; no zero-percent
+notification is sent. Small search spaces may cross several percentages on
+one tuple. Progress counts work, not elapsed time or an ETA.
+
+The library exposes `pbqp_solve_bruteforce_with_progress` with an optional
+synchronous C callback. Keep terminal output in the CLI. Callbacks must not
+throw or mutate the input. Progress scratch storage is allocated before
+enumeration. The no-progress path uses a compiled-away observer, with no
+per-tuple progress branch. Preserve exact boundaries even if the domain-size
+product exceeds size_t or uint64_t; do not saturate the total or report fake
+early percentages. The mixed-radix boundary is ceil(total * p / 100) - 1.
+
 The solver CLI prints `COST <cost>` and zero-based `NODE <id> <option>` records.
-Exit codes are 0 for success, 1 for errors, and 2 for proven infeasibility.
+Exit codes are 0 for success, 1 for errors, 2 for proven infeasibility, and
+3 for a search that found no solution without an infeasibility proof.
 Exhaustive search evaluates a number of tuples equal to the product of all
 node option counts and is intended for small instances.
 
-Generator options are `--nodes=N --edges=M --max-options=D --seed=S --output=FILE`;
-all are required. `pbqp_generate --help` describes them. Named options accept
-either `--name=value` or `--name value` in any order; reject duplicates, unknown
-options, missing values, and invalid numbers. The solver accepts `--` before
-positional paths starting with `--`. The generator accepts no positional values.
-Nodes have 1 through D options, with finite costs sampled in quarter steps
-from [-10, 10] and a 10% chance of INF per entry. The graph has exactly the
-requested number of distinct edges. Generated problems may be infeasible.
-Seeds reproduce output with the same build and standard library; do not
-promise identical sampling across different standard library implementations.
+Generator options and families are described in `doc/generation.md`.
+`--nodes=N --edges=M --seed=S --output=FILE` are always required. Modes:
+
+- `--mode=random` (default): requires `--max-options=D`; quarter-step costs
+  in [-10, 10] with a 10% chance of INF per entry; may be infeasible.
+- `--mode=planted`: same domains/cost family, but selected unary and pairwise
+  entries of a hidden assignment are forced finite. Guarantees feasibility.
+- `--mode=regalloc`: requires `--registers=R`. Every node has R+1 options;
+  spill is option 0 with a finite positive cost uniformly sampled from
+  `--spill-cost-min` through `--spill-cost-max` (defaults 10, 100). Register
+  unary costs are zero. Edge matrices are zero except for INF on register
+  diagonals; spill's row and column stay zero. All-spill is always allowed.
+
+Floyd sampling selects distinct pair ranks, with complement sampling for
+dense graphs. Output is sorted by endpoints; mapping ranks takes O(M log N)
+without a quadratic scan for sparse workloads. Maintain deterministic output
+for a fixed seed/build; do not promise identical sampling across different
+standard libraries or generator revisions.
+
+Named options accept either `--name=value` or `--name value` in any order;
+reject duplicates, unknown options, missing values, and invalid numbers.
+Reject mode-inapplicable options rather than silently ignoring them. The
+solver accepts `--` before positional paths starting with `--`. The generator
+accepts no positional values. `pbqp_generate --help` describes all modes.
 
 ## Verification
 
@@ -201,8 +274,19 @@ ctest --test-dir build-clang-modules --output-on-failure
 Checks remain active in Release builds. Preserve the C interoperability test,
 float round trips, and independent recursive comparisons on generated small
 problems. Current example optima are 0, 40, and 80 for examples 1, 2, and 3.
-When changing float tests, account for summation order and rounding; the random
-reference comparisons use quarter-step inputs whose small sums are exact.
+The recursive oracle evaluates complete tuples in reference summation order
+and tracks feasibility separately from the best cost; it also covers ordinary
+non-exact float sums and infinite accumulated values. Keep it independent of
+the shared evaluator. Failed comparisons report the seed, dimensions, both
+assignments/costs, and a retained failing problem dump. Test checks use
+`std::source_location` so ordinary failures identify their source line.
+Also preserve direct C API validation, ownership lifetime checks, partial-read
+cleanup tests, I/O failures (including `/dev/full` when available), greedy
+traps, and sparse graph generation without quadratic pair scans.
+Heartbeat tests cover the C callback, unchanged solver output, the complete
+1..100 notification sequence, empty and infeasible searches, and no early
+progress on a timed-out 2^65-tuple search. Do not run example 5's complete
+2,176,782,336-tuple enumeration as a routine CTest entry.
 
 For memory-sensitive changes, an additional sanitizer build is useful:
 

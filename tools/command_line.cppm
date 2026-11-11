@@ -28,7 +28,8 @@ class Arguments {
   bool help_requested = false;
 
 public:
-  Arguments(int argc, char **argv, std::span<const std::string_view> names) {
+  Arguments(int argc, char **argv, std::span<const std::string_view> names,
+            std::span<const std::string_view> flags = {}) {
     bool positional_only = false;
     for (int i = 1; i < argc; ++i) {
       std::string_view argument(argv[i]);
@@ -40,6 +41,15 @@ public:
       } else if (!positional_only && argument.starts_with("--")) {
         auto equals = argument.find('=');
         auto name = argument.substr(0, equals);
+        if (std::find(flags.begin(), flags.end(), name) != flags.end()) {
+          if (equals != std::string_view::npos)
+            throw std::invalid_argument("flag takes no value: " +
+                                        std::string(name));
+          if (!options.emplace(name, std::string_view{}).second)
+            throw std::invalid_argument("duplicate option: " +
+                                        std::string(name));
+          continue;
+        }
         if (std::find(names.begin(), names.end(), name) == names.end())
           throw std::invalid_argument("unknown option: " + std::string(name));
         std::string_view value;
@@ -64,6 +74,11 @@ public:
   bool help() const noexcept { return help_requested; }
   const std::vector<std::string_view> &positional() const noexcept {
     return paths;
+  }
+  bool has(std::string_view name) const { return options.contains(name); }
+  std::string_view get(std::string_view name, std::string_view fallback) const {
+    auto option = options.find(name);
+    return option == options.end() ? fallback : option->second;
   }
   std::string_view require(std::string_view name) const {
     auto option = options.find(name);

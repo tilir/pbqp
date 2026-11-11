@@ -102,8 +102,12 @@ pbqp_cost_t TextReader::cost() {
     return PBQP_INF;
   const char *begin = token.data();
   const char *end = begin + token.size();
-  if (*begin == '+')
+  if (*begin == '+') {
     ++begin;
+    if (begin == end || *begin == '+' || *begin == '-')
+      fail(PBQP_INVALID, "expected one optional sign before cost",
+           current_token_line);
+  }
   pbqp_cost_t value = 0;
   auto result = std::from_chars(begin, end, value, std::chars_format::general);
   if (result.ec == std::errc::result_out_of_range)

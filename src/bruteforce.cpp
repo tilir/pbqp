@@ -20,26 +20,8 @@ module;
 module pbqp;
 import :error;
 import :ownership;
-
-bool evaluate(const pbqp_problem &p, const size_t *tuple,
-              pbqp_cost_t &cost) noexcept {
-  cost = 0;
-  for (size_t k = 0; k < p.num_nodes; ++k) {
-    pbqp_cost_t c = p.nodes[k].costs[tuple[k]];
-    if (c == PBQP_INF)
-      return false;
-    cost = pbqp_cost_add(cost, c);
-  }
-  for (size_t k = 0; k < p.num_edges; ++k) {
-    const auto &e = p.edges[k];
-    pbqp_cost_t c =
-        e.costs[tuple[e.src] * p.nodes[e.tgt].num_options + tuple[e.tgt]];
-    if (c == PBQP_INF)
-      return false;
-    cost = pbqp_cost_add(cost, c);
-  }
-  return true;
-}
+import :evaluation;
+import :progress;
 
 bool advance(const pbqp_problem &p, size_t *tuple) noexcept {
   for (size_t k = p.num_nodes; k > 0; --k) {
@@ -50,16 +32,35 @@ bool advance(const pbqp_problem &p, size_t *tuple) noexcept {
   return false;
 }
 
-extern "C" {
-void pbqp_solution_free(pbqp_solution *solution) {
-  if (!solution)
-    return;
-  delete[] solution->options;
-  delete solution;
+template <class Observer>
+bool enumerate_assignments(const pbqp_problem &p, pbqp_solution &solution,
+                           size_t *tuple, Observer observe) noexcept {
+  bool found = false;
+  do {
+    pbqp_cost_t cost;
+    if (evaluate_assignment(p, tuple, cost) &&
+        (!found || cost < solution.cost)) {
+      found = true;
+      solution.cost = cost;
+      if (p.num_nodes)
+        std::copy_n(tuple, p.num_nodes, solution.options);
+    }
+    observe(tuple);
+  } while (advance(p, tuple));
+  return found;
 }
 
+extern "C" {
 pbqp_status pbqp_solve_bruteforce(const pbqp_problem *p, pbqp_solution **out,
                                   pbqp_error *error) {
+  return pbqp_solve_bruteforce_with_progress(p, nullptr, nullptr, out, error);
+}
+
+pbqp_status pbqp_solve_bruteforce_with_progress(const pbqp_problem *p,
+                                                pbqp_progress_callback progress,
+                                                void *user_data,
+                                                pbqp_solution **out,
+                                                pbqp_error *error) {
   pbqp_clear_error(error);
   if (out)
     *out = nullptr;
@@ -84,16 +85,24 @@ pbqp_status pbqp_solve_bruteforce(const pbqp_problem *p, pbqp_solution **out,
       return pbqp_fail(error, PBQP_NO_MEMORY, 0, "allocation failed");
   }
 
-  bool found = false;
-  do {
-    pbqp_cost_t cost;
-    if (evaluate(*p, tuple.get(), cost) && (!found || cost < solution->cost)) {
-      found = true;
-      solution->cost = cost;
-      if (p->num_nodes)
-        std::copy_n(tuple.get(), p->num_nodes, solution->options);
-    }
-  } while (advance(*p, tuple.get()));
+  std::unique_ptr<size_t[]> boundary;
+  if (progress && p->num_nodes) {
+    boundary.reset(new (std::nothrow) size_t[p->num_nodes]);
+    if (!boundary)
+      return pbqp_fail(error, PBQP_NO_MEMORY, 0, "allocation failed");
+  }
+  bool found;
+  if (progress) {
+    PercentProgress reporter(*p, progress, user_data, boundary.get());
+    found = enumerate_assignments(*p, *solution, tuple.get(),
+                                  [&](const size_t *completed) noexcept {
+                                    reporter.completed(completed);
+                                  });
+  } else {
+    // The no-op observer is compiled away when progress is disabled.
+    found = enumerate_assignments(*p, *solution, tuple.get(),
+                                  [](const size_t *) noexcept {});
+  }
   if (!found)
     return pbqp_fail(error, PBQP_INFEASIBLE, 0, "no feasible tuple");
   solution->quality = PBQP_SOLUTION_OPTIMAL;
