@@ -1,0 +1,76 @@
+PBQP 1
+NODES 5
+EDGES 9
+
+# Options for every node: spill x0 x1 x2
+
+NODE 0 4
+100 0 0 0
+
+NODE 1 4
+90 0 0 0
+
+NODE 2 4
+80 0 0 0
+
+NODE 3 4
+70 0 0 0
+
+NODE 4 4
+60 0 0 0
+
+EDGE 0 1
+0 0   0   0
+0 INF 0   0
+0 0   INF 0
+0 0   0   INF
+
+EDGE 0 2
+0 0   0   0
+0 INF 0   0
+0 0   INF 0
+0 0   0   INF
+
+EDGE 0 3
+0 0   0   0
+0 INF 0   0
+0 0   INF 0
+0 0   0   INF
+
+EDGE 0 4
+0 0   0   0
+0 INF 0   0
+0 0   INF 0
+0 0   0   INF
+
+EDGE 1 2
+0 0   0   0
+0 INF 0   0
+0 0   INF 0
+0 0   0   INF
+
+EDGE 1 3
+0 0   0   0
+0 INF 0   0
+0 0   INF 0
+0 0   0   INF
+
+EDGE 1 4
+0 0   0   0
+0 INF 0   0
+0 0   INF 0
+0 0   0   INF
+
+EDGE 2 3
+0 0   0   0
+0 INF 0   0
+0 0   INF 0
+0 0   0   INF
+
+EDGE 2 4
+0 0   0   0
+0 INF 0   0
+0 0   INF 0
+0 0   0   INF
+
+END

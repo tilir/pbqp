@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }} / Clang 21
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Release
+            build_type: Release
+            sanitizer_flags: ""
+          - name: ASan + UBSan
+            build_type: Debug
+            sanitizer_flags: -fsanitize=address,undefined -fno-omit-frame-pointer
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang 21 and build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | gpg --dearmor > "$RUNNER_TEMP/llvm-keyring.gpg"
+          sudo install -m 0644 "$RUNNER_TEMP/llvm-keyring.gpg" /usr/share/keyrings/llvm.gpg
+          echo 'deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main' \
+            | sudo tee /etc/apt/sources.list.d/llvm-21.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-21 clang-tools-21 clang-format-21 libclang-rt-21-dev cmake ninja-build
+          clang++-21 --version
+          clang-format-21 --version
+          cmake --version
+
+      - name: Configure
+        run: >-
+          cmake -G Ninja -S . -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_C_COMPILER=clang-21
+          -DCMAKE_CXX_COMPILER=clang++-21
+          -DCMAKE_C_FLAGS="${{ matrix.sanitizer_flags }}"
+          -DCMAKE_CXX_FLAGS="${{ matrix.sanitizer_flags }}"
+
+      - name: Check formatting
+        if: matrix.build_type == 'Release'
+        run: cmake --build build --target check-format
+
+      - name: Build
+        run: cmake --build build --parallel 2
+
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build --output-on-failure
