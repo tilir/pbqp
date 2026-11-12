@@ -63,6 +63,61 @@ breaking ties by ID. It chooses the first cheapest allowed option using costs
 to already assigned nodes. This is cheap and may be suboptimal. A successful
 result is FEASIBLE; a dead end is NO_SOLUTION, not proof of INFEASIBLE.
 
+## R1/R2/RN reduction heuristic
+
+```sh
+pbqp --solve=greedy examples/06_too_long_for_any_exact.pbqp
+pbqp --solve=r1r2rn examples/06_too_long_for_any_exact.pbqp
+```
+
+`--solve=r1r2rn` implements the reduction/backpropagation scheme used by LLVM
+PBQP. It clones the input graph and repeatedly removes a node:
+
+- R0: disconnect an isolated node, retaining its unary costs.
+- R1: remove a degree-one node x. For each option of its neighbor y, add
+  `min_x (edge(x,y) + unary(x))` to y's unary cost.
+- R2: remove a degree-two node x with neighbors y and z. Add the matrix
+  `delta(y,z) = min_x (edge(y,x) + edge(x,z) + unary(x))` to their existing
+  edge, or create a fill edge if they were unconnected.
+- RN: when no degree-zero/one/two node remains, disconnect a high-degree node
+  without propagating its costs. This is the heuristic step.
+
+Low-degree nodes are processed by ID. RN first prefers the lowest-ID node with
+conservatively available nonzero options: either the sum of worst per-neighbor
+forbidden-option counts is smaller than its available option count, or one
+option is compatible with every allowed neighbor choice. Otherwise RN chooses
+the lowest current unary cost for option zero, then lowest degree and ID.
+Option zero is the spill preference in regalloc inputs. Other inputs, including
+singleton domains and forbidden option zero, are accepted too.
+
+The design follows LLVM's `llvm/include/llvm/CodeGen/PBQP/ReductionRules.h`
+and `llvm/include/llvm/CodeGen/RegAllocPBQP.h`. It adapts the allocatability
+test to arbitrary domains and explicit prohibitions, including a neighbor's
+option zero; it does not depend on LLVM or promise identical assignments.
+
+Preparation allocates the graph and R2 fill matrices and records the reduction
+order. Surviving adjacency excludes removed nodes, while removed nodes retain
+their frozen costs and edges to later nodes. Allocation-free backpropagation
+visits the order in reverse and chooses the first cheapest allowed option given
+already assigned neighbors. There is no backtracking or heartbeat mode.
+
+Intermediate costs retain a separate feasibility flag: a feasible overflow to
+infinity must not become a forbidden choice. All additions use `pbqp_cost_add`.
+Regrouping overflowed intermediate values can also create NaN; numerical
+scores take precedence over NaN scores, with first-option ties when all scores
+are NaN. This affects heuristic preferences, never input validation or the
+final reference-order evaluation.
+
+Every success returns FEASIBLE, including empty problems and graphs reduced
+using only R0/R1/R2. These local reductions are exact in real arithmetic, but
+regrouping float sums can change the reference-order optimum. RN can also
+prevent a feasible assignment from being reconstructed. A dead end returns
+NO_SOLUTION, never INFEASIBLE. The final assignment is checked against the
+original problem and its cost is recomputed by the shared reference evaluator.
+
+Example 06 runs through both heuristics in CTest, without starting exact
+search. Neither heuristic is guaranteed to dominate the other on all inputs.
+
 ## Heartbeat
 
 `--heartbeat` is supported by `naive` and `bnb`. It writes at most 100 flushed

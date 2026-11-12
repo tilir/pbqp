@@ -8,6 +8,7 @@ set(PBQP_LIBRARY_SOURCES
   bruteforce.cpp
   branch_and_bound.cpp
   greedy.cpp
+  reduction.cpp
   solution.cpp)
 set(PBQP_LIBRARY_MODULES
   pbqp.cppm
@@ -21,6 +22,8 @@ set(PBQP_LIBRARY_MODULES
   bruteforce.cppm
   branch_and_bound.cppm
   greedy.cppm
+  reduction_graph.cppm
+  reduction.cppm
   progress.cppm)
 add_library(pbqp ${PBQP_LIBRARY_SOURCES} ${PBQP_PUBLIC_HEADERS})
 target_sources(pbqp PRIVATE FILE_SET CXX_MODULES FILES ${PBQP_LIBRARY_MODULES})

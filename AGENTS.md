@@ -89,6 +89,13 @@
   workspace allocation, node priorities, edge indexing, option scoring, and
   assignment. Preparation allocates all search storage; `run` does not allocate,
   backtrack, or claim optimality.
+- `src/reduction_graph.cppm`: private `:reduction_graph` partition with owned
+  costs, mutable active adjacency, frozen eliminated adjacency, and R2 fill.
+  Intermediate feasibility is independent of the float score.
+- `src/reduction.cppm`: private `:reduction` partition with `ReductionSearch`.
+  Preparation applies R0/R1/R2/RN and allocates fill matrices; `run` performs
+  allocation-free reverse assignment and reference evaluation.
+- `src/reduction.cpp`: validation and ownership boundary for the heuristic C API.
 - `tools/pbqp.cpp`: named solver selection and solver CLI. Exception handling
   covers C++ argument parsing only; C API calls report statuses.
 - `tools/command_line.cppm`: shared `pbqp.command_line` module for named options,
@@ -133,7 +140,8 @@ objects. Preparation may allocate and throw; translate `std::bad_alloc` to
 Do not duplicate allocation checks in solver logic. Retain `std::unique_ptr`
 for individual owned objects. Do not add `-fno-exceptions`; modules use
 consistent compiler options. Search uses status returns; do not add exceptions,
-allocation, or validation inside search loops.
+allocation, or validation inside search loops. Reduction graph construction
+and R2 fill allocation belong to preparation, before reverse assignment.
 
 For APIs returning owned objects, set output pointers to NULL on failure.
 Clear structured evaluation outputs on failure. A supplied
@@ -166,8 +174,8 @@ a solution; inspect `quality` to distinguish `PBQP_SOLUTION_FEASIBLE` from
 `PBQP_SOLUTION_OPTIMAL`. The reference solver sets OPTIMAL after exhaustive
 search. `PBQP_INFEASIBLE` requires proof that no feasible assignment exists.
 A heuristic failing to find an assignment returns `PBQP_NO_SOLUTION`, never
-`PBQP_INFEASIBLE`. Greedy returns FEASIBLE even when it happens to find an
-optimum or solves the empty problem.
+`PBQP_INFEASIBLE`. Greedy and reduction return FEASIBLE even when they happen to find an
+optimum or solve the empty problem.
 
 `pbqp_evaluate_assignment` validates inputs and indices, then reports both a
 reference-order cost and an independent `is_feasible` flag. A forbidden tuple
@@ -210,6 +218,18 @@ Cache minima and allocate all storage before iterative search. No recursion,
 allocation, or exceptions are needed inside search. See
 `doc/solvers.md` for the numerical argument and progress policy.
 
+The reduction heuristic clones the problem and prefers R0/R1/R2 by node ID.
+R1 adds a minimized leaf contribution to its neighbor; R2 adds minimized
+contributions to a neighbor edge, allocating fill if needed. RN disconnects
+one high-degree node without propagation, preferring conservatively available
+nonzero options, then lowest option-zero cost, degree, and ID. Match LLVM's
+reduction scheme, without depending on its regalloc-only domain assumptions.
+Keep feasibility separate from overflowed intermediate float costs. Preserve
+frozen eliminated-node costs/edges for reverse assignment; later mutations
+must touch active adjacency only. Final costs use the original reference
+order. Always return FEASIBLE on success; failed reconstruction is NO_SOLUTION.
+See `doc/solvers.md` for formulas and the deterministic NaN preference policy.
+
 Input accepts decimal fractions and scientific notation. Keep the classic
 locale for serialization and use `max_digits10` precision so finite float
 costs round-trip. Preserve the PBQP 1 ordering and comment rules documented
@@ -224,8 +244,8 @@ reusable generator library; `pbqp_generate` is its CLI. Both tools link the
 shared `pbqp_command_line` library for argument parsing.
 
 Invoke the solver as `pbqp --solve=naive INPUT`. `pbqp --help` lists available
-solvers: `naive` selects exhaustive search, `bnb` exact branch-and-bound, and
-`greedy` the heuristic. Do not
+solvers: `naive` selects exhaustive search, `bnb` exact branch-and-bound,
+`greedy` cost-priority assignment, and `r1r2rn` reduction/backpropagation. Do not
 reintroduce `solve` or `dump` positional subcommands. Problem dumping remains
 available to library users through `pbqp_write`.
 `--heartbeat` is a valueless flag for `naive` and `bnb`. It writes one flushed dot to
@@ -326,7 +346,11 @@ assignments/costs, and a retained failing problem dump. Test checks use
 `std::source_location` so ordinary failures identify their source line.
 Also preserve direct C API validation, ownership lifetime checks, partial-read
 cleanup tests, I/O failures (including `/dev/full` when available), greedy
-traps, and sparse graph generation without quadratic pair scans.
+traps, and sparse graph generation without quadratic pair scans. Reduction
+coverage includes R1 orientations, heterogeneous domains, R2 fill and existing
+edges, RN dead ends, overflow feasibility, and input/solution ownership.
+`06_too_long_for_any_exact.pbqp` runs only through greedy and r1r2rn in tests;
+validate both assignments and reference-order costs without exact search.
 Heartbeat tests cover the C callback, unchanged solver output, the complete
 1..100 notification sequence, empty and infeasible searches, and no early
 progress on a timed-out 2^65-tuple search. Do not run `05_too_long_for_naive.pbqp`'s complete

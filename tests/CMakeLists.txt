@@ -28,5 +28,6 @@ add_test(NAME cli COMMAND "${CMAKE_COMMAND}"
   "-DPBQP=$<TARGET_FILE:pbqp_cli>"
   "-DGENERATOR=$<TARGET_FILE:pbqp_generate>"
   "-DEXAMPLE=${PROJECT_SOURCE_DIR}/examples/01_basic.pbqp"
+  "-DHEURISTIC_EXAMPLE=${PROJECT_SOURCE_DIR}/examples/06_too_long_for_any_exact.pbqp"
   "-DWORK=${PROJECT_BINARY_DIR}/cli-test"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/cli.cmake")

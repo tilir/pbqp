@@ -53,6 +53,11 @@ int main(void) {
   ok = solution->quality == PBQP_SOLUTION_OPTIMAL && solution->cost == -2 &&
        solution->options[0] == 1;
   pbqp_solution_free(solution);
+  if (!ok || pbqp_solve_reduction(&problem, &solution, NULL) != PBQP_OK)
+    return 1;
+  ok = solution->quality == PBQP_SOLUTION_FEASIBLE && solution->cost == -2 &&
+       solution->options[0] == 1;
+  pbqp_solution_free(solution);
   {
     progress_log log = {0, 0};
     if (pbqp_solve_bruteforce_with_progress(&problem, record_progress, &log,

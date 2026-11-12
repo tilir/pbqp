@@ -32,6 +32,7 @@ void help() {
          "  naive   Exhaustive search; proves optimality or infeasibility.\n"
          "  bnb     Exact branch-and-bound; prunes bounded or forbidden "
          "subtrees.\n"
+         "  r1r2rn  R1/R2/RN reduction and backpropagation heuristic.\n"
          "  greedy  Cost-priority heuristic; returns a feasible, possibly "
          "suboptimal solution.\n";
 }
@@ -56,10 +57,11 @@ std::optional<SolverOptions> parse_options(int argc, char **argv) {
     if (arguments.help())
       return SolverOptions{.help_requested = true};
     auto solver = arguments.require("--solve");
-    if (solver != "naive" && solver != "greedy" && solver != "bnb")
+    if (solver != "naive" && solver != "greedy" && solver != "bnb" &&
+        solver != "r1r2rn")
       throw std::invalid_argument("unknown solver: " + std::string(solver));
     bool report_progress = arguments.has("--heartbeat");
-    if (report_progress && solver == "greedy")
+    if (report_progress && solver != "naive" && solver != "bnb")
       throw std::invalid_argument(
           "--heartbeat is supported only by the naive and bnb solvers");
     if (arguments.positional().size() != 1)
@@ -97,6 +99,8 @@ pbqp_status solve_problem(const SolverOptions &options,
   pbqp_status status;
   if (options.solver == "greedy") {
     status = pbqp_solve_greedy(&problem, &raw, &error);
+  } else if (options.solver == "r1r2rn") {
+    status = pbqp_solve_reduction(&problem, &raw, &error);
   } else {
     auto solve = options.solver == "naive"
                      ? pbqp_solve_bruteforce_with_progress

@@ -1,0 +1,37 @@
+/*
+ * Public C entry point for the R1/R2/RN reduction heuristic.
+ *
+ * Validates borrowed input, prepares an independent reduction graph, and
+ * transfers solution ownership only after successful backpropagation.
+ *
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Distributed under GNU GPL version 3, WITHOUT ANY WARRANTY.
+ * See LICENSE for the full license text.
+ */
+module;
+#include "pbqp.h"
+
+module pbqp;
+import :api_boundary;
+import :error;
+import :problem;
+import :reduction;
+
+extern "C" pbqp_status pbqp_solve_reduction(const pbqp_problem *problem,
+                                            pbqp_solution **out,
+                                            pbqp_error *error) {
+  if (out)
+    *out = nullptr;
+  return api_call(error, [&]() -> pbqp_status {
+    if (!out)
+      return pbqp_fail(error, PBQP_INVALID, 0, "missing output pointer");
+    validate(problem);
+    ReductionSearch search(*problem);
+    search.prepare();
+    auto status = search.run(error);
+    if (status != PBQP_OK)
+      return status;
+    *out = search.release_solution();
+    return PBQP_OK;
+  });
+}

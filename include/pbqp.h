@@ -259,6 +259,22 @@ pbqp_status pbqp_solve_branch_and_bound_with_progress(
 pbqp_status pbqp_solve_greedy(const pbqp_problem *problem, pbqp_solution **out,
                               pbqp_error *error);
 
+/* R0/R1/R2/RN reduction heuristic with the same validation, borrowing,
+ * ownership, and diagnostic contracts as pbqp_solve_greedy. R1 propagates leaf
+ * costs to a neighbor; R2 creates or updates a neighbor-pair matrix. RN removes
+ * a high-degree node for later assignment. Options are reconstructed in reverse
+ * reduction order, choosing the first cheapest allowed option.
+ * RN prioritizes conservatively allocatable nonzero options, then low cost of
+ * option zero (the spill preference), degree, and node ID. Arbitrary domains
+ * remain valid; option zero need not actually be a spill or always allowed.
+ * Reductions regroup float arithmetic. Every successful result has quality
+ * PBQP_SOLUTION_FEASIBLE, including empty and R1/R2-only problems; the reported
+ * cost is recomputed in reference order. Returns PBQP_NO_SOLUTION on a dead
+ * end, never PBQP_INFEASIBLE. Fill matrices are allocated during preparation;
+ * backpropagation performs no allocation. */
+pbqp_status pbqp_solve_reduction(const pbqp_problem *problem,
+                                 pbqp_solution **out, pbqp_error *error);
+
 #ifdef __cplusplus
 }
 #endif
