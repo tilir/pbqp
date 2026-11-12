@@ -37,6 +37,7 @@ public:
   explicit ReductionSearch(const pbqp_problem &p) : problem(p), graph(p) {}
   void prepare();
   pbqp_status run(pbqp_error *error) noexcept;
+  const pbqp_solution &get_solution() const noexcept { return *solution; }
   pbqp_solution *release_solution() noexcept { return solution.release(); }
 };
 

@@ -28,7 +28,11 @@ extern "C" {
 /* Finite costs use float; positive infinity represents a forbidden choice.
  * Input costs must not be NaN or negative infinity. */
 typedef float pbqp_cost_t;
+#ifdef __cplusplus
+inline constexpr pbqp_cost_t PBQP_INF = INFINITY;
+#else
 static const pbqp_cost_t PBQP_INF = INFINITY;
+#endif
 
 typedef struct pbqp_node {
   size_t num_options;
@@ -68,7 +72,9 @@ typedef enum pbqp_status {
    * assignment without a proof must never be reported as this status. */
   PBQP_INFEASIBLE,
   /* Search ended without an assignment or a proof of infeasibility. */
-  PBQP_NO_SOLUTION
+  PBQP_NO_SOLUTION,
+  /* Runtime or scheduler failure; no solution is returned. */
+  PBQP_INTERNAL_ERROR
 } pbqp_status;
 
 /* Ordinary floating-point addition, with the platform's rounding and
@@ -205,8 +211,22 @@ pbqp_status pbqp_solve_bruteforce(const pbqp_problem *problem,
 /* Called synchronously after each completed integer percentage, from 1
  * through 100, at most once per percentage. Several percentages may complete
  * on one tuple or pruned subtree. user_data is borrowed for the call.
- * A callback must not throw exceptions or modify the problem or its arrays. */
+ * Notifications are serialized and may run on TBB workers during a parallel
+ * call. Workers may merge counts in batches: notifications can lag completed
+ * work, but never precede their exact thresholds. All completed percentages
+ * are reported before return. A callback must not throw or modify the problem
+ * or its arrays. */
 typedef void (*pbqp_progress_callback)(unsigned percent, void *user_data);
+
+/* Initialize all fields, e.g. {1, NULL, NULL}. num_threads must be positive
+ * and fit in int, the oneTBB arena's concurrency type. The limit includes the
+ * calling thread. Task count or available TBB resources may reduce concurrency.
+ * Options and user_data are borrowed only during the synchronous call. */
+typedef struct pbqp_solve_options {
+  size_t num_threads;
+  pbqp_progress_callback progress;
+  void *user_data;
+} pbqp_solve_options;
 
 /* Same solver and ownership contract as pbqp_solve_bruteforce, with optional
  * progress reporting. A NULL callback disables reporting. Percentages count
@@ -221,28 +241,48 @@ pbqp_status pbqp_solve_bruteforce_with_progress(const pbqp_problem *problem,
                                                 pbqp_solution **out,
                                                 pbqp_error *error);
 
+/* Parallel exhaustive search. NULL options use one thread and no callback.
+ * Every tuple is evaluated, including forbidden ones. Workers share immutable
+ * input only; private minima are merged by cost, then lexicographic assignment,
+ * preserving the same first minimum as single-thread naive search. Progress
+ * reports exact tuple counts with serialized callbacks, potentially on TBB
+ * workers. The call joins all work before returning an independent solution.
+ * Runtime/scheduler failures are PBQP_INTERNAL_ERROR. */
+pbqp_status
+pbqp_solve_bruteforce_with_options(const pbqp_problem *problem,
+                                   const pbqp_solve_options *options,
+                                   pbqp_solution **out, pbqp_error *error);
+
 /* Exact branch-and-bound with the same validation, ownership, evaluation,
- * output, and diagnostic contracts as pbqp_solve_bruteforce. Nodes and options
- * are visited in ID order, retaining the first lexicographic minimum.
- * Greedy supplies an initial upper bound when it finds a feasible solution.
- * Prunes bounds > the upper bound until exact search finds a feasible tuple,
- * then prunes bounds >= it; this preserves the first lexicographic minimum.
- * Lower bounds sum independent term minima in reference evaluation order;
- * negative costs and floating-point overflow remain supported. On PBQP_OK,
- * quality is PBQP_SOLUTION_OPTIMAL under the reference float semantics.
- * Returns PBQP_INFEASIBLE only after proving no feasible assignment exists. */
+ * output, and diagnostic contracts as pbqp_solve_bruteforce. Returns any
+ * optimum under reference-order float evaluation; tied assignments need not
+ * match naive search and can depend on thread scheduling. Greedy and reduction
+ * seed feasible incumbents. Bounds condition options on the fixed prefix and
+ * sum independent term minima in reference order, without regrouping floats.
+ * Prunes L >= G whenever a feasible incumbent exists. On PBQP_OK quality is
+ * PBQP_SOLUTION_OPTIMAL; PBQP_INFEASIBLE requires an exhaustive proof.
+ * This entry point uses one thread. */
 pbqp_status pbqp_solve_branch_and_bound(const pbqp_problem *problem,
                                         pbqp_solution **out, pbqp_error *error);
 
-/* Optional progress callback for branch-and-bound. Reports the same 1..100
- * percentages as exhaustive search, counting all tuples in completely searched
- * or pruned prefix subtrees. A pruned subtree can complete many percentages
- * at once. Percentages measure covered search space, not time or visited
- * search nodes. NULL disables reporting. Before-search errors report nothing;
- * successful search or an infeasibility proof reports 100. */
+/* B&B reports exact covered-space percentages, counting tuples in searched or
+ * pruned subtrees. Completed subtrees may arrive out of order. Notifications
+ * are serialized, monotone 1..100, and may run on a TBB worker thread while the
+ * solver call is active. The callback must not throw or mutate input. NULL
+ * disables reporting. Before-search errors report nothing; successful search
+ * and infeasibility proofs report 100. This entry point uses one thread. */
 pbqp_status pbqp_solve_branch_and_bound_with_progress(
     const pbqp_problem *problem, pbqp_progress_callback progress,
     void *user_data, pbqp_solution **out, pbqp_error *error);
+
+/* NULL options select one thread and no progress. Other contracts match the
+ * B&B entry points above. All workspaces are private to workers; only immutable
+ * input/minima, a synchronized incumbent, and covered-space reporting are
+ * shared. No callback outlives the call. Runtime/scheduler exceptions become
+ * PBQP_INTERNAL_ERROR; allocation failures remain PBQP_NO_MEMORY. */
+pbqp_status pbqp_solve_branch_and_bound_with_options(
+    const pbqp_problem *problem, const pbqp_solve_options *options,
+    pbqp_solution **out, pbqp_error *error);
 
 /* Validates and borrows inputs with the same ownership rules as brute force.
  * Visits nodes by descending (maximum - minimum) finite unary cost, breaking

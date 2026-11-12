@@ -9,6 +9,7 @@
  * See LICENSE for the full license text.
  */
 #include "pbqp.h"
+#include <charconv>
 #include <exception>
 #include <iomanip>
 #include <iostream>
@@ -18,16 +19,19 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 import pbqp.command_line;
 
 namespace {
 void help() {
   std::cout
-      << "Usage: pbqp --solve=SOLVER [--heartbeat] INPUT\n"
+      << "Usage: pbqp --solve=SOLVER [--heartbeat] [--numthreads=N] INPUT\n"
          "       pbqp --help\n\n"
          "  --heartbeat  Print one dot per completed percent to stderr (naive "
          "or bnb).\n\n"
+         "  --numthreads=N  Exact-solver concurrency, positive integer "
+         "(default 1).\n\n"
          "Solvers:\n"
          "  naive   Exhaustive search; proves optimality or infeasibility.\n"
          "  bnb     Exact branch-and-bound; prunes bounded or forbidden "
@@ -47,11 +51,12 @@ struct SolverOptions {
   std::string_view input{};
   bool report_progress = false;
   bool help_requested = false;
+  size_t num_threads = 1;
 };
 
 std::optional<SolverOptions> parse_options(int argc, char **argv) {
   try {
-    constexpr std::string_view names[] = {"--solve"};
+    constexpr std::string_view names[] = {"--solve", "--numthreads"};
     constexpr std::string_view flags[] = {"--heartbeat"};
     const pbqp_tools::Arguments arguments(argc, argv, names, flags);
     if (arguments.help())
@@ -67,8 +72,22 @@ std::optional<SolverOptions> parse_options(int argc, char **argv) {
     if (arguments.positional().size() != 1)
       throw std::invalid_argument("expected exactly one input file");
 
+    size_t num_threads = 1;
+    if (arguments.has("--numthreads")) {
+      if (solver != "bnb" && solver != "naive")
+        throw std::invalid_argument(
+            "--numthreads is supported only by the naive and bnb solvers");
+      auto value = arguments.require("--numthreads");
+      auto parsed = std::from_chars(value.data(), value.data() + value.size(),
+                                    num_threads);
+      if (parsed.ec != std::errc{} ||
+          parsed.ptr != value.data() + value.size() || !num_threads ||
+          num_threads > static_cast<size_t>(std::numeric_limits<int>::max()))
+        throw std::invalid_argument(
+            "--numthreads requires a positive integer that fits in int");
+    }
     return SolverOptions{solver, arguments.positional().front(),
-                         report_progress};
+                         report_progress, false, num_threads};
   } catch (const std::exception &error) {
     std::cerr << error.what()
               << "\nUse --help for usage and available solvers.\n";
@@ -101,12 +120,18 @@ pbqp_status solve_problem(const SolverOptions &options,
     status = pbqp_solve_greedy(&problem, &raw, &error);
   } else if (options.solver == "r1r2rn") {
     status = pbqp_solve_reduction(&problem, &raw, &error);
+  } else if (options.solver == "bnb") {
+    const pbqp_solve_options config{
+        options.num_threads, options.report_progress ? heartbeat : nullptr,
+        nullptr};
+    status = pbqp_solve_branch_and_bound_with_options(&problem, &config, &raw,
+                                                      &error);
   } else {
-    auto solve = options.solver == "naive"
-                     ? pbqp_solve_bruteforce_with_progress
-                     : pbqp_solve_branch_and_bound_with_progress;
-    status = solve(&problem, options.report_progress ? heartbeat : nullptr,
-                   nullptr, &raw, &error);
+    const pbqp_solve_options config{
+        options.num_threads, options.report_progress ? heartbeat : nullptr,
+        nullptr};
+    status =
+        pbqp_solve_bruteforce_with_options(&problem, &config, &raw, &error);
   }
   solution.reset(raw);
   return status;

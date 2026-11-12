@@ -38,6 +38,12 @@
   Wrap their definitions explicitly in `extern "C"` so they match the global
   declarations from `pbqp.h`. The public header remains includable from C;
   callers do not need to import modules.
+- Keep oneTBB task/scheduler headers and calls in `src/parallel.cpp`, a
+  module implementation unit. GCC cannot serialize some TU-local TBB helpers
+  from a partition; do not work around this by suppressing diagnostics or
+  exporting internal names. Worker and planner declarations stay in partitions.
+- Explain each explicit non-sequential atomic memory order next to its use:
+  identify the paired publication/read or why no publication is required.
 - Apply const correctness to views and accessors. Do not use `const_cast` to
   expose mutable storage from a const object.
 - Use C++ streams for file and terminal I/O, and standard library ownership
@@ -85,11 +91,22 @@
   without multiplying domain sizes into a fixed-width counter.
 - `src/solution.cpp`: public assignment evaluator and solution destruction.
 - `src/bruteforce.cpp`: validation and ownership boundary for exhaustive search.
-- `src/bruteforce.cppm`: private `:bruteforce` partition with vector workspace
-  and allocation-free lexicographic reference enumeration.
+- `src/bruteforce.cppm`: direct single-thread lexicographic reference enumeration.
+- `src/bruteforce_parallel.cppm`: private exhaustive workers, ordered coarse jobs,
+  and a final cost/lexicographic reduction without per-tuple shared-best locking.
 - `src/branch_and_bound.cpp`: validation and ownership boundary for exact search.
-- `src/branch_and_bound.cppm`: private `:branch_and_bound` partition with cached
-  unary, matrix, and row minima and iterative lexicographic depth-first search.
+- `src/branch_and_bound.cppm`: coarse prefix queue and per-worker orchestration.
+- `src/bnb_bounds.cppm`: immutable minima, option order, checked regalloc symmetry,
+  forward checking, and reference-order conditioned bounds. Keep construction
+  as named preparation steps and individual bound terms as small helpers.
+- `src/bnb_incumbent.cppm`: mutex-protected assignment and atomic cost/feasibility.
+- `src/bnb_tasks.cppm`: adaptive viable-prefix frontier and large-domain batches.
+- `src/bnb_worker.cppm`: private assignment/cursors/scratch/local best and iterative
+  allocation-free DFS within one prefix subtree.
+- `src/search_progress.cppm`: shared serialized mixed-radix covered-space counts.
+- `src/search_tasks.cppm`: shared prefix descriptors/planning and atomic tickets.
+- `src/parallel.cppm`: private synchronous TBB dispatch declaration.
+- `src/parallel.cpp`: shared oneTBB arena/task-group implementation bridge.
 - `src/greedy.cpp`: validation and ownership boundary for the greedy C API.
 - `src/greedy.cppm`: private `:greedy` partition with `GreedySearch`, separating
   workspace allocation, node priorities, edge indexing, option scoring, and
@@ -116,10 +133,13 @@
 - `tools/generate.cpp`: generator CLI argument handling.
 - `tests/test_pbqp.cpp`: examples, round trips, invalid input, arithmetic,
   diagnostics, quality, and comparison with independent recursive search.
+- `tests/test_parallel_exact.cpp`: multiworker costs/naive ties, serialized progress,
+  mixed domains, huge counts, no-seed cases, and independent solution ownership.
 - `tests/test_reduction.cpp`: randomized low-degree differential tests, RN
   cache invalidation, sparse shape reconstruction, and ownership checks.
-- `benchmarks/CMakeLists.txt`, `benchmarks/reduction.cpp`: optional Google
-  Benchmark star/K4 scalability cases, enabled with `PBQP_BUILD_BENCHMARKS`.
+- `benchmarks/CMakeLists.txt`, `benchmarks/reduction.cpp`,
+  `benchmarks/branch_and_bound.cpp`, `benchmarks/bruteforce.cpp`: optional Google
+  Benchmark star/K4 scaling, example-07 and binary-enumeration thread counts, enabled with `PBQP_BUILD_BENCHMARKS`.
   Use `find_package(benchmark CONFIG REQUIRED)` only when enabled, linking
   `benchmark::benchmark`. Register cases with `RegisterBenchmark` and an explicit
   main, without helper macros. Register formatting sources even when disabled.
@@ -154,6 +174,7 @@ exceptions translated by the shared `api_call` boundary. Use `std::vector`
 for owned arrays, including solver workspace and storage backing returned C
 objects. Preparation may allocate and throw; translate `std::bad_alloc` to
 `PBQP_NO_MEMORY` and `std::length_error` to `PBQP_OVERFLOW` only at the boundary.
+Other standard runtime/scheduler exceptions become `PBQP_INTERNAL_ERROR`.
 Do not duplicate allocation checks in solver logic. Retain `std::unique_ptr`
 for individual owned objects. Do not add `-fno-exceptions`; modules use
 consistent compiler options. Search uses status returns; do not add exceptions,
@@ -213,27 +234,44 @@ every node. Allocate scratch storage before the node/option loops. A dead end
 terminates with NO_SOLUTION. On `02_greedy_exact.pbqp`, greedy must color nodes 1, 3, and 5
 before spilling node 4, for total cost 40; its result quality remains FEASIBLE.
 
-Branch-and-bound assigns nodes and options in ID order and retains the first
-lexicographic optimum. Its lower bound substitutes each unresolved term with
-an independent minimum, then adds all terms in reference evaluation order.
-Use selected matrix entries for fully assigned edges, row minima for assigned
-sources, and matrix minima otherwise. Since src < tgt, assigned prefixes need
-no column minima. Rounded addition is monotone for these finite input terms;
-this establishes a bound despite negative costs or infinite accumulated sums.
-Do not regroup suffix sums or prune solely on the partial assigned cost.
-An explicit INF term proves a prefix impossible, but accumulated infinity
-alone does not. Run greedy during preparation to seed the upper bound using
-its reference-order solution cost. A heuristic dead end supplies no bound;
-continue exact search without treating it as infeasibility. Start with positive
-infinity if no seed exists. Before the first feasible tuple found by exact
-search, prune only when `L > G`: greedy's assignment may follow an earlier
-equal optimum. After exact search finds a feasible tuple, prune `L >= G`, since
-subsequent tied tuples cannot precede the incumbent. Lower G on each improvement.
-This preserves lexicographic tie-breaking while closing equal-cost subtrees
-without enumeration.
-Cache minima and allocate all storage before iterative search. No recursion,
-allocation, or exceptions are needed inside search. See
-`doc/solvers.md` for the numerical argument and progress policy.
+Branch-and-bound returns any reference-order optimum; ties can depend on
+scheduling. Naive alone preserves the first lexicographic minimum. B&B assigns
+nodes in ID order and visits options by unary cost, then ID. Shared immutable
+bounds include unary, row, and matrix minima; each worker owns its assignment,
+DFS cursors, allowed-option scratch, and local best solution. Forward checking
+removes explicit-INF options against the fixed prefix, tightening independent
+unary and pairwise minima. Sum those terms in original reference order, never
+regrouping suffixes or pruning solely on assigned partial cost.
+
+Seed the shared incumbent from successful greedy and reduction runs. A heuristic
+dead end is not infeasibility. Cost and a separate feasible flag are atomic;
+copy the winning assignment under a mutex before publication. Frequent bound
+checks never copy the incumbent assignment. Stale upper bounds allow extra work.
+Prune `L >= G` whenever a feasible incumbent exists, including overflowed +INF.
+Without an incumbent, infinity alone cannot discard a feasible subtree.
+
+Detect register symmetry only after checking every original unary and matrix:
+all nodes share a domain, registers cost zero, spill rows/columns are zero,
+register diagonals INF, and other register pairs zero. Canonicalize new register
+names in order of first appearance. Renaming preserves reference terms; do not
+apply this optimization to arbitrary PBQP matrices or unequal domains.
+
+Use an adaptive viable-prefix frontier with about 32 jobs per requested worker,
+child batches for huge domains, and a bounded planning expansion budget. The
+single-thread path uses the same planner but no scheduler. A oneTBB task_arena
+and task_group run fixed consumers claiming whole subtrees from an atomic
+index. Never create a task per DFS vertex or implement a custom thread pool.
+Allocate worker scratch before search; TBB runtime allocations stay outside DFS.
+Keep all input/worker storage alive through task-group completion. Report
+closed planning prefixes only after preparation succeeds. See `doc/solvers.md`.
+
+Parallel naive uses the same TBB dispatcher, prefix jobs, and coverage counter,
+but no heuristic or bound can prune a tuple. Sort its jobs lexicographically;
+an individual consumer receives increasing indices and retains its first local
+minimum. After joining, merge worker results by reference cost and lexicographic
+assignment, including feasible +/-INF costs. This preserves naive's first-minimum
+contract. Keep the single-thread naive path direct and its no-progress observer
+compiled away. The new entry point is `pbqp_solve_bruteforce_with_options`.
 
 The reduction heuristic clones the problem and prefers R0/R1/R2 by node ID.
 R1 adds a minimized leaf contribution to its neighbor; R2 adds minimized
@@ -268,24 +306,33 @@ Use `add_subdirectory` and link the `pbqp` CMake target to embed the library.
 C callers need the C++ runtime at final link time; CMake handles this.
 The `pbqp_cli` target produces the `pbqp` executable. `pbqp_generator` is the
 reusable generator library; `pbqp_generate` is its CLI. Both tools link the
-shared `pbqp_command_line` library for argument parsing.
+shared `pbqp_command_line` library for argument parsing. The library links
+installed oneTBB via `find_package(TBB CONFIG REQUIRED COMPONENTS tbb)` and
+`TBB::tbb`; development systems and CI need `libtbb-dev`.
 
 Invoke the solver as `pbqp --solve=naive INPUT`. `pbqp --help` lists available
 solvers: `naive` selects exhaustive search, `bnb` exact branch-and-bound,
 `greedy` cost-priority assignment, and `r1r2rn` reduction/backpropagation. Do not
 reintroduce `solve` or `dump` positional subcommands. Problem dumping remains
 available to library users through `pbqp_write`.
+`--numthreads=N` is a positive, int-representable naive/B&B concurrency limit,
+accepting either named-option spelling; default 1. The C options entry point is
+`pbqp_solve_branch_and_bound_with_options`; NULL options select one thread and
+no callback, and zero threads is invalid. Both options-based exact solvers use
+`pbqp_solve_options`. Legacy exact entry points use one thread.
+
 `--heartbeat` is a valueless flag for `naive` and `bnb`. It writes one flushed dot to
 stderr for each completed integer percentage, from 1 through 100, followed by
 a newline at completion. Count all tuples, including forbidden assignments.
 The first dot is emitted after ceil(total / 100) visited tuples; no zero-percent
 notification is sent. For branch-and-bound, count all tuples in fully searched
-or pruned subtrees, so a single cut may cross many percentage boundaries.
+or pruned subtrees, including symmetry cuts and deferred planning events, so a
+single cut may cross many percentage boundaries.
 Small search spaces may cross several percentages on one tuple. Progress
 counts covered space, not elapsed time or an ETA.
 
 The library exposes `pbqp_solve_bruteforce_with_progress` with an optional
-synchronous C callback, and the corresponding
+synchronous C callback, options-based parallel entry points, and the corresponding
 `pbqp_solve_branch_and_bound_with_progress` entry point. Keep terminal output
 in the CLI. Callbacks must not
 throw or mutate the input. Progress scratch storage is allocated before
@@ -293,8 +340,16 @@ enumeration. The no-progress path uses a compiled-away observer, with no
 per-tuple progress branch. Preserve exact boundaries even if the domain-size
 product exceeds size_t or uint64_t; do not saturate the total or report fake
 early percentages. The mixed-radix boundary is ceil(total * p / 100) - 1.
-`PercentProgress::completed_prefix` compares boundaries against the final
-tuple of a closed prefix, implicitly treating its unassigned suffix as maximal.
+Naive retains its exact lexicographic `PercentProgress` boundaries. Parallel exact search uses
+`SubtreeProgress` to add each closed prefix's suffix product in mixed radix,
+without multiplying the full domain product. Out-of-order completion is safe;
+a mutex serializes batch merges and callbacks. Each worker owns an accumulator;
+flush it after 256 small closures, after a one-percent-sized cut, and at every
+job boundary. Never take the shared progress mutex per tuple or DFS closure.
+Allocate accumulators during preparation. Pending counts can delay notification
+but never justify an early percentage; flush all tails before return.
+Parallel callbacks may run on TBB workers
+and must not throw or modify input; no callback outlives the synchronous call.
 
 The solver CLI prints `COST <cost>` and zero-based `NODE <id> <option>` records.
 Exit codes are 0 for success, 1 for errors, 2 for proven infeasibility, and
@@ -341,7 +396,8 @@ The formatting file list includes `.cppm` interfaces and the C API test.
 The targets are available only when CMake finds `clang-format-21`.
 
 `.github/workflows/ci.yml` runs on pushes, pull requests, and manual dispatch.
-It uses Ubuntu 24.04, the official LLVM apt repository, Clang 21, and Ninja.
+It uses Ubuntu 24.04, the official LLVM apt repository, Clang 21, Ninja, and
+packaged oneTBB.
 The Release job checks formatting; both Release and ASan/UBSan jobs build and
 run CTest, including the C interoperability test. Sanitizer errors fail CI,
 and leak checking remains enabled on GitHub's runner.
@@ -369,7 +425,9 @@ The recursive oracle evaluates complete tuples in reference summation order
 and tracks feasibility separately from the best cost; it also covers ordinary
 non-exact float sums and infinite accumulated values. Keep it independent of
 the shared evaluator. Failed comparisons report the seed, dimensions, both
-assignments/costs, and a retained failing problem dump. Test checks use
+assignments/costs, and a retained failing problem dump. Compare B&B costs and
+assignment feasibility, allowing different tied winners; naive still compares
+the full lexicographic assignment. Test checks use
 `std::source_location` so ordinary failures identify their source line.
 Also preserve direct C API validation, ownership lifetime checks, partial-read
 cleanup tests, I/O failures (including `/dev/full` when available), greedy
@@ -390,7 +448,7 @@ Heartbeat tests cover the C callback, unchanged solver output, the complete
 progress on a timed-out 2^65-tuple search. Do not run `05_too_long_for_naive.pbqp`'s complete
 2,176,782,336-tuple enumeration as a routine CTest entry.
 Preserve greedy-seed regressions for dead ends, suboptimal initial solutions,
-lexicographic ties, reference rounding, and infinite accumulated seed costs.
+reference rounding, tied optimum costs, and infinite accumulated seed costs.
 Compare branch-and-bound with both naive and the independent oracle on all
 small generator families, including fractional spill costs and extreme float
 values. Preserve targeted negative-edge and cancellation regressions; a
@@ -421,6 +479,31 @@ second, and an empirical complexity fit. Consult the
 [Google Benchmark user guide](https://google.github.io/benchmark/user_guide.html)
 for the framework's command-line options.
 
+`pbqp_benchmark_bnb` loads examples 07 and 08 from the checkout root. Example 07
+compares 1/2/4/8 requested threads; example 08 compares 1/4/16 with heartbeat
+enabled and disabled, covering progress contention. Both use `UseRealTime`, so
+worker CPU time is not mistaken for elapsed solve time. Parsing and an optimum
+and assignment check are untimed. The benchmark heartbeat uses a no-op callback
+to measure progress accounting without terminal I/O. Run:
+
+```sh
+cmake --build build-clang-modules --target pbqp_benchmark_bnb
+./build-clang-modules/pbqp_benchmark_bnb --benchmark_repetitions=3 \
+  --benchmark_out=/tmp/pbqp-bnb.json --benchmark_out_format=json
+```
+
+`pbqp_benchmark_naive` compares 1/2/4/8 threads on a fixed binary 20-node
+problem, evaluating all 2^20 tuples per solve. It reports wall time and tuples
+per second; setup and an optimum check are outside timing:
+
+```sh
+cmake --build build-clang-modules --target pbqp_benchmark_naive
+./build-clang-modules/pbqp_benchmark_naive --benchmark_repetitions=3
+```
+
+Do not add a full example-07 solve to ordinary CTest. The optimum is zero;
+all terms are nonnegative and the returned zero-cost coloring is feasible.
+
 Graph construction and a preflight assignment check run outside the measured
 loop. Each measured iteration includes public API validation, preparation,
 reconstruction, and returned-solution cleanup. Use these measurements to assess
@@ -443,3 +526,11 @@ LeakSanitizer cannot run under ptrace in some execution environments. In that
 case, run the same tests with `ASAN_OPTIONS=detect_leaks=0` and report that
 leak checking was unavailable. Documentation-only changes do not require
 rebuilding or rerunning the test suite.
+
+For ThreadSanitizer, instrument both PBQP and oneTBB. Build a separate oneTBB
+with `-DTBB_SANITIZE=thread`, then configure a separate PBQP build with
+`-fsanitize=thread` compile/link flags and `TBB_DIR` pointing to that installation.
+Run `test_parallel_exact` there. An uninstrumented system TBB can produce
+scheduler synchronization reports even for a minimal task-group example;
+do not suppress them to claim a clean PBQP run. The instrumented oneTBB
+2022.3.0 build passes this test with Clang 21.

@@ -41,7 +41,7 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/llvm-21.list
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang-21 clang-tools-21 clang-format-21 libclang-rt-21-dev cmake ninja-build
+            clang-21 clang-tools-21 clang-format-21 libclang-rt-21-dev cmake ninja-build libtbb-dev
           clang++-21 --version
           clang-format-21 --version
           cmake --version

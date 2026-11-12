@@ -10,6 +10,8 @@
  */
 module;
 #include "pbqp.h"
+#include <exception>
+#include <limits>
 #include <new>
 #include <stdexcept>
 
@@ -18,6 +20,13 @@ import :error;
 import :failure;
 
 namespace pbqp {
+size_t thread_count(const pbqp_solve_options *options) {
+  size_t count = options ? options->num_threads : 1;
+  if (!count || count > static_cast<size_t>(std::numeric_limits<int>::max()))
+    fail(PBQP_INVALID, "num_threads must be positive and fit in int");
+  return count;
+}
+
 template <class Operation>
 pbqp_status api_call(pbqp_error *error, Operation operation) noexcept {
   clear_error(error);
@@ -30,6 +39,8 @@ pbqp_status api_call(pbqp_error *error, Operation operation) noexcept {
                      "requested container size exceeds limits");
   } catch (const std::bad_alloc &) {
     return set_error(error, PBQP_NO_MEMORY, 0, "allocation failed");
+  } catch (const std::exception &failure) {
+    return set_error(error, PBQP_INTERNAL_ERROR, 0, failure.what());
   }
 }
 } // namespace pbqp

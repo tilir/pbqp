@@ -49,6 +49,7 @@ public:
   pbqp_status prepare(pbqp_error *error);
   pbqp_status run(pbqp_error *error) noexcept;
   pbqp_cost_t solution_cost() const noexcept { return solution->cost; }
+  const pbqp_solution &get_solution() const noexcept { return *solution; }
   pbqp_solution *release_solution() noexcept { return solution.release(); }
 };
 

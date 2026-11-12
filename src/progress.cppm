@@ -14,6 +14,35 @@ module;
 module pbqp:progress;
 
 namespace pbqp {
+void percentage_boundary(const pbqp_problem &problem, unsigned percent,
+                         size_t *boundary) noexcept {
+  if (percent == 100) {
+    for (size_t k = 0; k < problem.num_nodes; ++k)
+      boundary[k] = problem.nodes[k].num_options - 1;
+    return;
+  }
+  // Expand percent / 100 into domain-radix digits of floor(total * p / 100).
+  // Splitting each radix by 100 avoids overflowing remainder * radix.
+  size_t remainder = percent;
+  for (size_t k = 0; k < problem.num_nodes; ++k) {
+    size_t radix = problem.nodes[k].num_options;
+    size_t small = remainder * (radix % 100);
+    boundary[k] = remainder * (radix / 100) + small / 100;
+    remainder = small % 100;
+  }
+  // The zero-based tuple index is ceil(total * p / 100) - 1.
+  // An exact division needs one mixed-radix decrement.
+  if (remainder == 0) {
+    for (size_t k = problem.num_nodes; k > 0; --k) {
+      if (boundary[k - 1] != 0) {
+        --boundary[k - 1];
+        break;
+      }
+      boundary[k - 1] = problem.nodes[k - 1].num_options - 1;
+    }
+  }
+}
+
 class PercentProgress {
   const pbqp_problem &problem;
   pbqp_progress_callback callback;
@@ -22,31 +51,7 @@ class PercentProgress {
   unsigned next_percent = 1;
 
   void prepare_boundary() noexcept {
-    if (next_percent == 100) {
-      for (size_t k = 0; k < problem.num_nodes; ++k)
-        boundary[k] = problem.nodes[k].num_options - 1;
-      return;
-    }
-    // Expand percent / 100 into domain-radix digits of floor(total * p / 100).
-    // Splitting each radix by 100 avoids overflowing remainder * radix.
-    size_t remainder = next_percent;
-    for (size_t k = 0; k < problem.num_nodes; ++k) {
-      size_t radix = problem.nodes[k].num_options;
-      size_t small = remainder * (radix % 100);
-      boundary[k] = remainder * (radix / 100) + small / 100;
-      remainder = small % 100;
-    }
-    // The zero-based tuple index is ceil(total * p / 100) - 1.
-    // An exact division needs one mixed-radix decrement.
-    if (remainder == 0) {
-      for (size_t k = problem.num_nodes; k > 0; --k) {
-        if (boundary[k - 1] != 0) {
-          --boundary[k - 1];
-          break;
-        }
-        boundary[k - 1] = problem.nodes[k - 1].num_options - 1;
-      }
-    }
+    percentage_boundary(problem, next_percent, boundary);
   }
 
   bool reached(const size_t *tuple, size_t depth) const noexcept {

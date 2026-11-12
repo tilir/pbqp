@@ -74,5 +74,28 @@ int main(void) {
     ok = ok && log.count == 100 && !log.invalid && solution->cost == -2;
     pbqp_solution_free(solution);
   }
+  {
+    progress_log log = {0, 0};
+    pbqp_solve_options options = {4, record_progress, &log};
+    if (pbqp_solve_branch_and_bound_with_options(&problem, &options, &solution,
+                                                 NULL) != PBQP_OK)
+      return 1;
+    ok = ok && solution->quality == PBQP_SOLUTION_OPTIMAL &&
+         solution->cost == -2 && log.count == 100 && !log.invalid;
+    pbqp_solution_free(solution);
+    log.count = 0;
+    log.invalid = 0;
+    if (pbqp_solve_bruteforce_with_options(&problem, &options, &solution,
+                                           NULL) != PBQP_OK)
+      return 1;
+    ok = ok && solution->cost == -2 && solution->options[0] == 1 &&
+         log.count == 100 && !log.invalid;
+    pbqp_solution_free(solution);
+    options.num_threads = 0;
+    if (pbqp_solve_branch_and_bound_with_options(&problem, &options, &solution,
+                                                 NULL) != PBQP_INVALID ||
+        solution)
+      return 1;
+  }
   return ok ? 0 : 1;
 }

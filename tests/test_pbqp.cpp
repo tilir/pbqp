@@ -160,7 +160,8 @@ void solve_text(const std::string &text, pbqp_status expected, pbqp_cost_t cost,
     if (expected == PBQP_OK) {
       check(s && s->cost == cost && s->num_nodes == p->num_nodes);
       check(s->quality == PBQP_SOLUTION_OPTIMAL);
-      for (k = 0; options && k < s->num_nodes; ++k)
+      for (k = 0; solve == pbqp_solve_bruteforce && options && k < s->num_nodes;
+           ++k)
         check(s->options[k] == options[k]);
     } else
       check(!s);
@@ -419,7 +420,8 @@ void check_reference(const pbqp_problem &p) {
   const auto free_solution = [](pbqp_solution *s) noexcept {
     pbqp_solution_free(s);
   };
-  auto verify_exact = [&](auto solve, std::string_view name) {
+  auto verify_exact = [&](auto solve, std::string_view name,
+                          bool match_tuple = true) {
     pbqp_solution *raw = nullptr;
     auto status = solve(&p, &raw, nullptr);
     std::unique_ptr<pbqp_solution, decltype(free_solution)> solution(
@@ -428,7 +430,14 @@ void check_reference(const pbqp_problem &p) {
                                solution->cost == optimum &&
                                solution->num_nodes == best.size()
                          : status == PBQP_INFEASIBLE && !solution;
-    if (found && matches)
+    if (found && matches) {
+      pbqp_evaluation evaluation{};
+      matches =
+          pbqp_evaluate_assignment(&p, solution->options, solution->num_nodes,
+                                   &evaluation, nullptr) == PBQP_OK &&
+          evaluation.is_feasible && evaluation.cost == optimum;
+    }
+    if (found && matches && match_tuple)
       for (size_t k = 0; k < p.num_nodes; ++k)
         matches &= solution->options[k] == best[k];
     if (!matches) {
@@ -455,7 +464,21 @@ void check_reference(const pbqp_problem &p) {
       check(solution->quality == PBQP_SOLUTION_OPTIMAL);
   };
   verify_exact(pbqp_solve_bruteforce, "naive");
-  verify_exact(pbqp_solve_branch_and_bound, "bnb");
+  verify_exact(pbqp_solve_branch_and_bound, "bnb", false);
+  for (size_t threads : {size_t{2}, size_t{4}}) {
+    auto parallel = [&](const pbqp_problem *p, pbqp_solution **out,
+                        pbqp_error *error) {
+      const pbqp_solve_options options{threads, nullptr, nullptr};
+      return pbqp_solve_branch_and_bound_with_options(p, &options, out, error);
+    };
+    verify_exact(parallel, "parallel bnb", false);
+    auto exhaustive = [&](const pbqp_problem *p, pbqp_solution **out,
+                          pbqp_error *error) {
+      const pbqp_solve_options options{threads, nullptr, nullptr};
+      return pbqp_solve_bruteforce_with_options(p, &options, out, error);
+    };
+    verify_exact(exhaustive, "parallel naive");
+  }
 
   for (auto solve : {pbqp_solve_greedy, pbqp_solve_reduction}) {
     pbqp_solution *raw = nullptr;
@@ -829,7 +852,7 @@ void test_branch_and_bound_seed() {
     } else {
       check(!greedy);
     }
-    // Both exact solvers must match the independent oracle, including ties.
+    // Both exact solvers must match the independent optimum cost.
     check_reference(*problem);
     pbqp_error error{42, "old greedy diagnostic"};
     check(pbqp_solve_branch_and_bound(problem.get(), &raw_solution, &error) ==
@@ -1020,8 +1043,11 @@ void test_progress() {
         if (plain) {
           check(progress && progress->cost == plain->cost &&
                 progress->quality == plain->quality);
-          for (size_t k = 0; k < p.num_nodes; ++k)
-            check(progress->options[k] == plain->options[k]);
+          pbqp_evaluation evaluation{};
+          check(pbqp_evaluate_assignment(&p, progress->options,
+                                         progress->num_nodes, &evaluation,
+                                         nullptr) == PBQP_OK);
+          check(evaluation.is_feasible && evaluation.cost == plain->cost);
         } else
           check(!progress && status == PBQP_INFEASIBLE);
         pbqp_solution_free(plain);
