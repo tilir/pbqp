@@ -20,6 +20,7 @@ module;
 module pbqp:problem;
 import :failure;
 
+namespace pbqp {
 template <class T> void check_count(size_t n, size_t line = 0) {
   if (n > std::numeric_limits<size_t>::max() / sizeof(T))
     fail(PBQP_OVERFLOW, "allocation size overflow", line);
@@ -63,3 +64,4 @@ void validate(const pbqp_problem *p) {
     validate_costs(e.costs, count);
   }
 }
+} // namespace pbqp

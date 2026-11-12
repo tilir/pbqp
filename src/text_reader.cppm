@@ -20,6 +20,7 @@ module;
 module pbqp:text_reader;
 import :failure;
 
+namespace pbqp {
 class TextReader {
   std::istream &file;
   size_t line = 1;
@@ -134,3 +135,4 @@ int TextReader::comment() {
   } while (c != '\n' && c != std::char_traits<char>::eof());
   return c;
 }
+} // namespace pbqp

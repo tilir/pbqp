@@ -30,11 +30,11 @@ pbqp_status pbqp_solve_branch_and_bound_with_progress(
     pbqp_solution **out, pbqp_error *error) {
   if (out)
     *out = nullptr;
-  return api_call(error, [&]() -> pbqp_status {
+  return pbqp::api_call(error, [&]() -> pbqp_status {
     if (!out)
-      return pbqp_fail(error, PBQP_INVALID, 0, "missing output pointer");
-    validate(p);
-    BranchAndBoundSearch search(*p, progress, user_data);
+      return pbqp::set_error(error, PBQP_INVALID, 0, "missing output pointer");
+    pbqp::validate(p);
+    pbqp::BranchAndBoundSearch search(*p, progress, user_data);
     auto status = search.prepare(error);
     if (status != PBQP_OK)
       return status;

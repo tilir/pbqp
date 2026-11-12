@@ -31,11 +31,11 @@ pbqp_status pbqp_solve_bruteforce_with_progress(const pbqp_problem *p,
                                                 pbqp_error *error) {
   if (out)
     *out = nullptr;
-  return api_call(error, [&]() -> pbqp_status {
+  return pbqp::api_call(error, [&]() -> pbqp_status {
     if (!out)
-      return pbqp_fail(error, PBQP_INVALID, 0, "missing output pointer");
-    validate(p);
-    BruteForceSearch search(*p, progress, user_data);
+      return pbqp::set_error(error, PBQP_INVALID, 0, "missing output pointer");
+    pbqp::validate(p);
+    pbqp::BruteForceSearch search(*p, progress, user_data);
     search.prepare();
     auto status = search.run(error);
     if (status != PBQP_OK)

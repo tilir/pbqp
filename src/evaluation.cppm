@@ -13,6 +13,7 @@ module;
 
 module pbqp:evaluation;
 
+namespace pbqp {
 bool evaluate_assignment(const pbqp_problem &p, const size_t *tuple,
                          pbqp_cost_t &cost) noexcept {
   cost = 0;
@@ -36,3 +37,4 @@ bool evaluate_assignment(const pbqp_problem &p, const size_t *tuple,
   }
   return true;
 }
+} // namespace pbqp

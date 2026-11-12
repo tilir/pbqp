@@ -29,11 +29,11 @@
 
 import pbqp.generator;
 
-static std::string case_context;
+namespace {
+std::string case_context;
 
-static void
-check(bool condition,
-      std::source_location where = std::source_location::current()) {
+void check(bool condition,
+           std::source_location where = std::source_location::current()) {
   if (!condition) {
     std::ostringstream message;
     message << where.file_name() << ':' << where.line() << " in "
@@ -62,8 +62,8 @@ public:
   }
 };
 
-static pbqp_status read_text(const std::string &text, pbqp_problem **p,
-                             pbqp_error *error) {
+pbqp_status read_text(const std::string &text, pbqp_problem **p,
+                      pbqp_error *error) {
   TemporaryFile file;
   std::ofstream output(file.name(), std::ios::binary);
   output << text;
@@ -72,7 +72,7 @@ static pbqp_status read_text(const std::string &text, pbqp_problem **p,
   return pbqp_read(file.name().c_str(), p, error);
 }
 
-static void same_problem(const pbqp_problem *a, const pbqp_problem *b) {
+void same_problem(const pbqp_problem *a, const pbqp_problem *b) {
   size_t i, j;
   check(a->num_nodes == b->num_nodes && a->num_edges == b->num_edges);
   for (i = 0; i < a->num_nodes; ++i) {
@@ -90,7 +90,7 @@ static void same_problem(const pbqp_problem *a, const pbqp_problem *b) {
   }
 }
 
-static void check_roundtrip(const pbqp_problem *p) {
+void check_roundtrip(const pbqp_problem *p) {
   TemporaryFile file;
   pbqp_problem *copy = nullptr;
   pbqp_error error;
@@ -100,7 +100,7 @@ static void check_roundtrip(const pbqp_problem *p) {
   pbqp_problem_free(copy);
 }
 
-static void test_examples() {
+void test_examples() {
   constexpr const char *paths[] = {"examples/01_basic.pbqp",
                                    "examples/02_greedy_exact.pbqp",
                                    "examples/03_greedy_inexact.pbqp"};
@@ -133,7 +133,7 @@ static void test_examples() {
   }
 }
 
-static void test_algebra() {
+void test_algebra() {
   check(pbqp_cost_min(PBQP_INF, -3.5f) == -3.5f);
   check(pbqp_cost_min(PBQP_INF, PBQP_INF) == PBQP_INF);
   check(pbqp_cost_add(0.5f, -0.75f) == -0.25f);
@@ -148,8 +148,8 @@ static void test_algebra() {
   check(pbqp_cost_add(a, b) == a + b);
 }
 
-static void solve_text(const std::string &text, pbqp_status expected,
-                       pbqp_cost_t cost, const size_t *options) {
+void solve_text(const std::string &text, pbqp_status expected, pbqp_cost_t cost,
+                const size_t *options) {
   pbqp_problem *p = nullptr;
   pbqp_solution *s = nullptr;
   size_t k;
@@ -169,7 +169,7 @@ static void solve_text(const std::string &text, pbqp_status expected,
   pbqp_problem_free(p);
 }
 
-static void test_solver() {
+void test_solver() {
   const size_t rectangular[] = {1, 2};
   const size_t tie[] = {0, 0};
   solve_text("#comment\nPBQP\t1\r\nNODES 0 EDGES 0 END#eof", PBQP_OK, 0,
@@ -219,7 +219,7 @@ static void test_solver() {
              pbqp_cost_add(0.123456789f, -0.000000123456789f), nullptr);
 }
 
-static void test_invalid() {
+void test_invalid() {
   const char *cases[] = {
       "",
       "PBQP 2 NODES 0 EDGES 0 END",
@@ -270,7 +270,7 @@ static void test_invalid() {
   check(pbqp_validate(nullptr, &error) == PBQP_INVALID);
 }
 
-static void test_error_contract() {
+void test_error_contract() {
   auto invoke = [](auto call, pbqp_status expected) {
     pbqp_error error;
     error.line = 123;
@@ -359,7 +359,7 @@ static void test_error_contract() {
   check(!solution);
 }
 
-static void test_float_validation() {
+void test_float_validation() {
   pbqp_cost_t cost = std::numeric_limits<pbqp_cost_t>::quiet_NaN();
   pbqp_node node{1, &cost};
   pbqp_edge edge{0, 1, &cost};
@@ -381,7 +381,7 @@ static void test_float_validation() {
   check_roundtrip(&p);
 }
 
-static void check_reference(const pbqp_problem &p) {
+void check_reference(const pbqp_problem &p) {
   std::vector<size_t> tuple(p.num_nodes), best;
   pbqp_cost_t optimum = 0;
   bool found = false;
@@ -475,7 +475,7 @@ static void check_reference(const pbqp_problem &p) {
   }
 }
 
-static void test_generator() {
+void test_generator() {
   for (std::uint64_t seed = 0; seed < 200; ++seed) {
     size_t n = seed % 6;
     size_t pairs = n ? n * (n - 1) / 2 : 0;
@@ -516,7 +516,7 @@ static void test_generator() {
   }
 }
 
-static void test_direct_api() {
+void test_direct_api() {
   pbqp_cost_t costs[] = {0, 1};
   pbqp_node nodes[] = {{2, costs}, {2, costs}};
   pbqp_cost_t matrix[] = {0, 0, 0, 0};
@@ -612,7 +612,7 @@ static void test_direct_api() {
   }
 }
 
-static void test_greedy_and_rounding() {
+void test_greedy_and_rounding() {
   pbqp_problem *p = nullptr;
   // The cheap first option is a trap. Only backtracking discovers feasibility.
   check(read_text(
@@ -656,7 +656,7 @@ static void test_greedy_and_rounding() {
              nullptr);
 }
 
-static void test_io_failures() {
+void test_io_failures() {
   pbqp_error error{};
   pbqp_problem *p = nullptr;
   TemporaryFile missing;
@@ -690,7 +690,7 @@ static void test_io_failures() {
   check(contents == "preserve");
 }
 
-static void test_reduction() {
+void test_reduction() {
   const auto free_problem = [](pbqp_problem *p) noexcept {
     pbqp_problem_free(p);
   };
@@ -802,7 +802,7 @@ static void test_reduction() {
   }
 }
 
-static void test_branch_and_bound_seed() {
+void test_branch_and_bound_seed() {
   const auto free_problem = [](pbqp_problem *p) noexcept {
     pbqp_problem_free(p);
   };
@@ -857,7 +857,7 @@ static void test_branch_and_bound_seed() {
          PBQP_OK, -PBQP_INF, {1, 0});
 }
 
-static void test_branch_and_bound_bounds() {
+void test_branch_and_bound_bounds() {
   const size_t choice[] = {1, 0};
   // A positive assigned unary cost cannot justify pruning a negative edge.
   solve_text("PBQP 1 NODES 2 EDGES 1 NODE 0 2 0 10 NODE 1 1 0 "
@@ -905,7 +905,7 @@ static void test_branch_and_bound_bounds() {
   case_context.clear();
 }
 
-static void test_generator_families() {
+void test_generator_families() {
   using pbqp_tools::GeneratorFamily;
   for (auto family : {GeneratorFamily::Planted, GeneratorFamily::RegAlloc}) {
     for (std::uint64_t seed = 0; seed < 80; ++seed) {
@@ -978,14 +978,14 @@ struct ProgressLog {
   unsigned percentages[100]{};
 };
 
-static void collect_progress(unsigned percent, void *data) noexcept {
+void collect_progress(unsigned percent, void *data) noexcept {
   auto &log = *static_cast<ProgressLog *>(data);
   if (log.count < 100)
     log.percentages[log.count] = percent;
   ++log.count;
 }
 
-static void test_progress() {
+void test_progress() {
   for (const auto &dimensions : {std::vector<size_t>{},
                                  {1},
                                  {2},
@@ -1044,6 +1044,7 @@ static void test_progress() {
     pbqp_solution_free(solution);
   }
 }
+} // namespace
 
 int main() {
   try {

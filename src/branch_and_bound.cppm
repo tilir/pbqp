@@ -23,6 +23,7 @@ import :greedy;
 import :ownership;
 import :progress;
 
+namespace pbqp {
 class BranchAndBoundSearch {
   struct EdgeMinimum {
     size_t row_offset = 0;
@@ -63,7 +64,7 @@ pbqp_status BranchAndBoundSearch::allocate_workspace(pbqp_error *error) {
   for (size_t k = 0; k < problem.num_edges; ++k) {
     size_t count = problem.nodes[problem.edges[k].src].num_options;
     if (count > limit - rows)
-      return pbqp_fail(error, PBQP_OVERFLOW, 0, "row minimum count overflow");
+      return set_error(error, PBQP_OVERFLOW, 0, "row minimum count overflow");
     rows += count;
   }
   solution = make_solution(problem.num_nodes);
@@ -198,10 +199,11 @@ pbqp_status BranchAndBoundSearch::run(pbqp_error *error) noexcept {
     found = search([](const size_t *, size_t) noexcept {});
   }
   if (!found)
-    return pbqp_fail(error, PBQP_INFEASIBLE, 0, "no feasible tuple");
+    return set_error(error, PBQP_INFEASIBLE, 0, "no feasible tuple");
   if (!evaluate_assignment(problem, solution->options, solution->cost))
-    return pbqp_fail(error, PBQP_INVALID, 0,
+    return set_error(error, PBQP_INVALID, 0,
                      "branch-and-bound produced a forbidden assignment");
   solution->quality = PBQP_SOLUTION_OPTIMAL;
   return PBQP_OK;
 }
+} // namespace pbqp

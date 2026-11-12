@@ -13,6 +13,7 @@ module;
 
 module pbqp:progress;
 
+namespace pbqp {
 class PercentProgress {
   const pbqp_problem &problem;
   pbqp_progress_callback callback;
@@ -76,3 +77,4 @@ public:
     }
   }
 };
+} // namespace pbqp

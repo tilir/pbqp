@@ -22,11 +22,11 @@ extern "C" pbqp_status pbqp_solve_reduction(const pbqp_problem *problem,
                                             pbqp_error *error) {
   if (out)
     *out = nullptr;
-  return api_call(error, [&]() -> pbqp_status {
+  return pbqp::api_call(error, [&]() -> pbqp_status {
     if (!out)
-      return pbqp_fail(error, PBQP_INVALID, 0, "missing output pointer");
-    validate(problem);
-    ReductionSearch search(*problem);
+      return pbqp::set_error(error, PBQP_INVALID, 0, "missing output pointer");
+    pbqp::validate(problem);
+    pbqp::ReductionSearch search(*problem);
     search.prepare();
     auto status = search.run(error);
     if (status != PBQP_OK)

@@ -25,6 +25,15 @@ List available solvers, solve a problem, or generate a random instance:
 ./build/pbqp --solve=greedy /tmp/regalloc.pbqp
 ```
 
+Optional Google Benchmark cases measure reduction on stars and disjoint K4
+graphs. With `libbenchmark-dev` installed:
+
+```sh
+cmake -S . -B build -DPBQP_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target pbqp_benchmark_reduction
+./build/pbqp_benchmark_reduction --benchmark_repetitions=3
+```
+
 See the [solvers](doc/solvers.md), [file format](doc/format.md), [generator modes](doc/generation.md),
 [C API](include/pbqp.h), and [developer notes](AGENTS.md).
 

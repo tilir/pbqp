@@ -15,6 +15,7 @@ module;
 
 module pbqp:ownership;
 
+namespace pbqp {
 struct ProblemStorage : pbqp_problem {
   std::vector<pbqp_node> node_records;
   std::vector<pbqp_edge> edge_records;
@@ -50,3 +51,4 @@ using SolutionPtr = std::unique_ptr<SolutionStorage>;
 SolutionPtr make_solution(size_t num_nodes) {
   return std::make_unique<SolutionStorage>(num_nodes);
 }
+} // namespace pbqp

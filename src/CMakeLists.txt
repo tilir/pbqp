@@ -18,11 +18,13 @@ set(PBQP_LIBRARY_MODULES
   ownership.cppm
   problem.cppm
   text_reader.cppm
+  text_writer.cppm
   evaluation.cppm
   bruteforce.cppm
   branch_and_bound.cppm
   greedy.cppm
   reduction_graph.cppm
+  reduction_worklist.cppm
   reduction.cppm
   progress.cppm)
 add_library(pbqp ${PBQP_LIBRARY_SOURCES} ${PBQP_PUBLIC_HEADERS})

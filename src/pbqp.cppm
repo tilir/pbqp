@@ -1,7 +1,8 @@
 /*
  * Primary PBQP implementation module.
  *
- * Internal partitions share module linkage without exporting C++ helpers.
+ * Internal partitions use namespace pbqp and module linkage without exporting
+ * C++ helpers. Only the C API declares project names in the global namespace.
  * The public interface remains the standalone C API in pbqp.h.
  *
  * SPDX-License-Identifier: GPL-3.0-only

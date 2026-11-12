@@ -22,12 +22,12 @@ extern "C" pbqp_status pbqp_solve_greedy(const pbqp_problem *p,
                                          pbqp_error *error) {
   if (out)
     *out = nullptr;
-  return api_call(error, [&]() -> pbqp_status {
+  return pbqp::api_call(error, [&]() -> pbqp_status {
     if (!out)
-      return pbqp_fail(error, PBQP_INVALID, 0, "missing output pointer");
-    validate(p);
+      return pbqp::set_error(error, PBQP_INVALID, 0, "missing output pointer");
+    pbqp::validate(p);
 
-    GreedySearch search(*p);
+    pbqp::GreedySearch search(*p);
     auto status = search.prepare(error);
     if (status != PBQP_OK)
       return status;

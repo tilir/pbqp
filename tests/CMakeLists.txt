@@ -3,8 +3,10 @@
 # See LICENSE for the full license text.
 
 set(PBQP_TEST_SOURCES test_pbqp.cpp)
+set(PBQP_REDUCTION_TEST_SOURCES test_reduction.cpp)
 set(PBQP_C_API_TEST_SOURCES test_c_api.c)
-pbqp_register_format_sources(${PBQP_TEST_SOURCES} ${PBQP_C_API_TEST_SOURCES})
+pbqp_register_format_sources(${PBQP_TEST_SOURCES} ${PBQP_REDUCTION_TEST_SOURCES}
+  ${PBQP_C_API_TEST_SOURCES})
 set(PBQP_FORMAT_SOURCES "${PBQP_FORMAT_SOURCES}" PARENT_SCOPE)
 
 if(NOT BUILD_TESTING)
@@ -16,6 +18,11 @@ target_link_libraries(test_pbqp PRIVATE pbqp_generator)
 pbqp_configure_cxx_target(test_pbqp PRIVATE)
 add_test(NAME pbqp_tests COMMAND test_pbqp)
 set_tests_properties(pbqp_tests PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
+
+add_executable(test_reduction ${PBQP_REDUCTION_TEST_SOURCES})
+target_link_libraries(test_reduction PRIVATE pbqp)
+pbqp_configure_cxx_target(test_reduction PRIVATE)
+add_test(NAME reduction COMMAND test_reduction)
 
 add_executable(test_c_api ${PBQP_C_API_TEST_SOURCES})
 target_link_libraries(test_c_api PRIVATE pbqp)

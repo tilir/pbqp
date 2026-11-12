@@ -20,12 +20,12 @@ import :problem;
 
 extern "C" {
 void pbqp_problem_free(pbqp_problem *p) {
-  delete static_cast<ProblemStorage *>(p);
+  delete static_cast<pbqp::ProblemStorage *>(p);
 }
 
 pbqp_status pbqp_validate(const pbqp_problem *p, pbqp_error *error) {
-  return api_call(error, [&]() -> pbqp_status {
-    validate(p);
+  return pbqp::api_call(error, [&]() -> pbqp_status {
+    pbqp::validate(p);
     return PBQP_OK;
   });
 }

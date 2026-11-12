@@ -14,6 +14,7 @@ module;
 
 module pbqp:failure;
 
+namespace pbqp {
 struct Failure {
   pbqp_status status;
   size_t line;
@@ -24,3 +25,4 @@ struct Failure {
                               size_t line = 0) {
   throw Failure{status, line, message};
 }
+} // namespace pbqp

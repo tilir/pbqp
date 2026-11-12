@@ -22,6 +22,7 @@ import :error;
 import :evaluation;
 import :ownership;
 
+namespace pbqp {
 class GreedySearch {
   struct NodePriority {
     size_t id;
@@ -77,7 +78,7 @@ pbqp_status GreedySearch::order_nodes(pbqp_error *error) noexcept {
   for (size_t node = 0; node < problem.num_nodes; ++node) {
     pbqp_cost_t priority;
     if (!unary_cost_range(problem.nodes[node], priority))
-      return pbqp_fail(error, PBQP_NO_SOLUTION, 0,
+      return set_error(error, PBQP_NO_SOLUTION, 0,
                        "greedy search found no allowed unary option; "
                        "infeasibility is not proven");
     order[node] = {node, priority};
@@ -164,13 +165,14 @@ pbqp_status GreedySearch::run(pbqp_error *error) noexcept {
       ++end;
     auto edges = std::span<const size_t>(incident).subspan(begin, end - begin);
     if (!assign_node(node, edges))
-      return pbqp_fail(
+      return set_error(
           error, PBQP_NO_SOLUTION, 0,
           "greedy search reached a dead end; infeasibility is not proven");
   }
   if (!evaluate_assignment(problem, solution->options, solution->cost))
-    return pbqp_fail(error, PBQP_NO_SOLUTION, 0,
+    return set_error(error, PBQP_NO_SOLUTION, 0,
                      "greedy assignment is forbidden");
   solution->quality = PBQP_SOLUTION_FEASIBLE;
   return PBQP_OK;
 }
+} // namespace pbqp

@@ -16,7 +16,8 @@ module;
 
 module pbqp:error;
 
-inline pbqp_status pbqp_fail(pbqp_error *error, pbqp_status status, size_t line,
+namespace pbqp {
+inline pbqp_status set_error(pbqp_error *error, pbqp_status status, size_t line,
                              const char *message) {
   if (error) {
     error->line = line;
@@ -28,9 +29,10 @@ inline pbqp_status pbqp_fail(pbqp_error *error, pbqp_status status, size_t line,
   return status;
 }
 
-inline void pbqp_clear_error(pbqp_error *error) {
+inline void clear_error(pbqp_error *error) {
   if (error) {
     error->line = 0;
     error->message[0] = '\0';
   }
 }
+} // namespace pbqp

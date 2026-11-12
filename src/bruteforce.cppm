@@ -20,6 +20,7 @@ import :evaluation;
 import :ownership;
 import :progress;
 
+namespace pbqp {
 class BruteForceSearch {
   const pbqp_problem &problem;
   pbqp_progress_callback progress;
@@ -85,7 +86,8 @@ pbqp_status BruteForceSearch::run(pbqp_error *error) noexcept {
     found = search([](const size_t *) noexcept {});
   }
   if (!found)
-    return pbqp_fail(error, PBQP_INFEASIBLE, 0, "no feasible tuple");
+    return set_error(error, PBQP_INFEASIBLE, 0, "no feasible tuple");
   solution->quality = PBQP_SOLUTION_OPTIMAL;
   return PBQP_OK;
 }
+} // namespace pbqp

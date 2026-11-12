@@ -14,9 +14,14 @@
 - Start every source and header with a comment explaining its purpose and
   an SPDX `GPL-3.0-only` notice referring to `LICENSE`.
 - Keep internal C++ declarations and implementations in non-exported module
-  partitions (`module pbqp:name;`, stored as `.cppm`). Use module linkage
-  instead of a `pbqp_detail` namespace or exported helper declarations.
-  The primary `pbqp` interface exports no internal C++ names.
+  partitions (`module pbqp:name;`, stored as `.cppm`), inside namespace `pbqp`.
+  Namespace organization and module linkage serve separate purposes: keep
+  internal names scoped without exporting them or introducing `pbqp_detail`.
+  The primary `pbqp` interface exports no internal C++ names. Only the public
+  C API belongs in the global namespace. C API definitions qualify internal
+  helpers with `pbqp::`; do not introduce global using-directives/declarations.
+  Tool support remains in `pbqp_tools`, and executable-local helpers use an
+  anonymous namespace. Executable entry points `main` remain global.
 - Module definitions are compiled once, so small cohesive implementations can
   live directly in `.cppm` files without header-style ODR workarounds. Keep
   short accessors in their class definitions and longer methods nearby.
@@ -64,6 +69,7 @@
 - `src/pbqp.cppm`: primary module interface with no exported internal names.
 - `src/text_reader.cppm`: private `:text_reader` partition containing the stream
   tokenizer, comment handling, line tracking, and numeric parser.
+- `src/text_writer.cppm`: private `:text_writer` partition for cost serialization.
 - `src/problem.cppm`: private `:problem` partition containing structural
   validation and dimension checks.
 - `src/problem_api.cpp`: C problem destruction and validation entry points.
@@ -90,8 +96,12 @@
   assignment. Preparation allocates all search storage; `run` does not allocate,
   backtrack, or claim optimality.
 - `src/reduction_graph.cppm`: private `:reduction_graph` partition with owned
-  costs, mutable active adjacency, frozen eliminated adjacency, and R2 fill.
+  costs, indexed active adjacency, frozen eliminated adjacency, and R2 fill.
+  Swap-and-pop removal updates edge positions at the affected endpoint. Sort
+  adjacency by edge ID once on freezing to preserve arithmetic order.
   Intermediate feasibility is independent of the float score.
+- `src/reduction_worklist.cppm`: incremental low-degree, safe, and spill queues
+  with cached directed edge contributions and batched node-priority refreshes.
 - `src/reduction.cppm`: private `:reduction` partition with `ReductionSearch`.
   Preparation applies R0/R1/R2/RN and allocates fill matrices; `run` performs
   allocation-free reverse assignment and reference evaluation.
@@ -106,6 +116,13 @@
 - `tools/generate.cpp`: generator CLI argument handling.
 - `tests/test_pbqp.cpp`: examples, round trips, invalid input, arithmetic,
   diagnostics, quality, and comparison with independent recursive search.
+- `tests/test_reduction.cpp`: randomized low-degree differential tests, RN
+  cache invalidation, sparse shape reconstruction, and ownership checks.
+- `benchmarks/CMakeLists.txt`, `benchmarks/reduction.cpp`: optional Google
+  Benchmark star/K4 scalability cases, enabled with `PBQP_BUILD_BENCHMARKS`.
+  Use `find_package(benchmark CONFIG REQUIRED)` only when enabled, linking
+  `benchmark::benchmark`. Register cases with `RegisterBenchmark` and an explicit
+  main, without helper macros. Register formatting sources even when disabled.
 - `tests/test_c_api.c`: C compatibility and linkage checks.
 - `tests/cli.cmake`: end-to-end command-line usage, help, and diagnostic checks.
 
@@ -226,7 +243,17 @@ nonzero options, then lowest option-zero cost, degree, and ID. Match LLVM's
 reduction scheme, without depending on its regalloc-only domain assumptions.
 Keep feasibility separate from overflowed intermediate float costs. Preserve
 frozen eliminated-node costs/edges for reverse assignment; later mutations
-must touch active adjacency only. Final costs use the original reference
+must touch active adjacency only. Never scan and erase an active adjacency
+vector on each disconnect. Keep per-endpoint edge positions and sort each
+node's frozen edges by ID before propagation and backpropagation.
+Maintain RN availability incrementally: cache each edge direction's worst
+blocked count and unsafe-option flags, summing them per node. R1 feasibility
+changes invalidate contributions on every incident edge, in both directions;
+finite score-only changes invalidate the node's spill key. R2 fill/merge and
+edge removal update both endpoints. Batch candidate refreshes until the graph
+mutation is complete, and use immutable priority snapshots in ordered sets.
+Do not rescan unrelated candidates or split exact search into components.
+Final costs use the original reference
 order. Always return FEASIBLE on success; failed reconstruction is NO_SOLUTION.
 See `doc/solvers.md` for formulas and the deterministic NaN preference policy.
 
@@ -351,6 +378,13 @@ coverage includes R1 orientations, heterogeneous domains, R2 fill and existing
 edges, RN dead ends, overflow feasibility, and input/solution ownership.
 `06_too_long_for_any_exact.pbqp` runs only through greedy and r1r2rn in tests;
 validate both assignments and reference-order costs without exact search.
+Randomized trees, forests, and cycles use quarter-step costs small enough that
+all intermediate sums are exact. Compare feasibility and optimum cost with
+exhaustive search, without requiring identical tied tuples. Preserve input
+arrays and verify solution storage after destroying the input. Include RN
+regressions for neighbor feasibility and finite spill-priority changes.
+Large stars vary center ID and edge storage order; disconnected K4s exercise
+repeated RN selection. Keep wall-clock thresholds out of ordinary CTest.
 Heartbeat tests cover the C callback, unchanged solver output, the complete
 1..100 notification sequence, empty and infeasible searches, and no early
 progress on a timed-out 2^65-tuple search. Do not run `05_too_long_for_naive.pbqp`'s complete
@@ -363,6 +397,35 @@ values. Preserve targeted negative-edge and cancellation regressions; a
 reassociated or partial-only bound must not discard a better solution.
 Check 100 callbacks on huge feasible and root-infeasible 2^65-tuple spaces
 that branch-and-bound can close quickly.
+
+Google Benchmark scalability cases are optional and are not CTest entries.
+Install the Google Benchmark development package (for example,
+`libbenchmark-dev`), or make its CMake package available through
+`CMAKE_PREFIX_PATH`. The default library/tool/test build has no dependency on
+Google Benchmark and never downloads it automatically. Build PBQP in Release
+and keep the same Google Benchmark package and measurement conditions when
+comparing revisions. The system `libbenchmark-dev` package is sufficient.
+
+```sh
+cmake -S . -B build-clang-modules -DPBQP_BUILD_BENCHMARKS=ON
+cmake --build build-clang-modules --target pbqp_benchmark_reduction
+./build-clang-modules/pbqp_benchmark_reduction --benchmark_repetitions=3 \
+  --benchmark_out=/tmp/pbqp-reduction.json --benchmark_out_format=json
+```
+
+`Reduction/Star` and `Reduction/K4` cover 8k, 16k, 32k, and 64k nodes. Google
+Benchmark controls iterations, repetitions, timing, statistics, and output.
+Use `--benchmark_list_tests` to list cases and `--benchmark_filter=Reduction/K4`
+to select a family. Each case reports node/edge counters, nodes processed per
+second, and an empirical complexity fit. Consult the
+[Google Benchmark user guide](https://google.github.io/benchmark/user_guide.html)
+for the framework's command-line options.
+
+Graph construction and a preflight assignment check run outside the measured
+loop. Each measured iteration includes public API validation, preparation,
+reconstruction, and returned-solution cleanup. Use these measurements to assess
+scaling rather than asserting tight timing ratios in tests. Formatting includes
+benchmark sources with the option off.
 
 For memory-sensitive changes, an additional sanitizer build is useful:
 

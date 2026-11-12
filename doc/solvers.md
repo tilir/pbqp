@@ -95,6 +95,19 @@ and `llvm/include/llvm/CodeGen/RegAllocPBQP.h`. It adapts the allocatability
 test to arbitrary domains and explicit prohibitions, including a neighbor's
 option zero; it does not depend on LLVM or promise identical assignments.
 
+Active adjacency records each edge's position at both endpoints. Removal uses
+swap-and-pop, avoiding repeated scans and shifts on high-degree neighbors.
+When a node is selected for reduction, its adjacency is sorted by edge ID and
+frozen. This retains input/fill edge order in arithmetic and reconstruction.
+
+Low-degree, conservatively allocatable, and spill candidates have separate
+ordered queues. Cached per-edge availability contributions are updated when
+an edge is added, changed, or removed. When R1 changes unary feasibility, all
+incident contributions are recomputed in both directions; a finite score-only
+change refreshes just that node's priority. RN selection therefore does not
+rescan unrelated active or eliminated nodes. Queue updates take logarithmic
+time; matrix work remains local to affected edges.
+
 Preparation allocates the graph and R2 fill matrices and records the reduction
 order. Surviving adjacency excludes removed nodes, while removed nodes retain
 their frozen costs and edges to later nodes. Allocation-free backpropagation
