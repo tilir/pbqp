@@ -1,0 +1,33 @@
+/*
+ * Exception translation at the public C API boundary.
+ *
+ * Keeps allocation failures and container limits out of solver logic while
+ * preserving status codes and bounded diagnostics for C callers.
+ *
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Distributed under GNU GPL version 3, WITHOUT ANY WARRANTY.
+ * See LICENSE for the full license text.
+ */
+module;
+#include "pbqp.h"
+#include <new>
+#include <stdexcept>
+
+module pbqp:api_boundary;
+import :error;
+import :failure;
+
+template <class Operation>
+pbqp_status api_call(pbqp_error *error, Operation operation) noexcept {
+  pbqp_clear_error(error);
+  try {
+    return operation();
+  } catch (const Failure &failure) {
+    return pbqp_fail(error, failure.status, failure.line, failure.message);
+  } catch (const std::length_error &) {
+    return pbqp_fail(error, PBQP_OVERFLOW, 0,
+                     "requested container size exceeds limits");
+  } catch (const std::bad_alloc &) {
+    return pbqp_fail(error, PBQP_NO_MEMORY, 0, "allocation failed");
+  }
+}

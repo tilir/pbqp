@@ -16,15 +16,15 @@ List available solvers, solve a problem, or generate a random instance:
 
 ```sh
 ./build/pbqp --help
-./build/pbqp --solve=naive examples/1.pbqp
-./build/pbqp --solve=naive --heartbeat examples/5.pbqp
-./build/pbqp --solve=greedy examples/3.pbqp
+./build/pbqp --solve=naive examples/01_basic.pbqp
+./build/pbqp --solve=bnb --heartbeat examples/05_too_long_for_naive.pbqp
+./build/pbqp --solve=greedy examples/03_greedy_inexact.pbqp
 ./build/pbqp_generate --mode=regalloc --nodes=1000 --edges=3000 \
   --registers=16 --seed=42 --output=/tmp/regalloc.pbqp
 ./build/pbqp --solve=greedy /tmp/regalloc.pbqp
 ```
 
-See the [file format](doc/format.md), [generator modes](doc/generation.md),
+See the [solvers](doc/solvers.md), [file format](doc/format.md), [generator modes](doc/generation.md),
 [C API](include/pbqp.h), and [developer notes](AGENTS.md).
 
 Licensed under [GNU GPL v3](LICENSE).

@@ -47,8 +47,8 @@ typedef struct pbqp_edge {
 /* May describe caller-owned arrays without transferring their ownership.
  * Objects returned by pbqp_read instead own their arrays and must be treated
  * as read-only: do not replace any pointers or change counts or dimensions,
- * including those in node and edge records. pbqp_problem_free relies on the
- * original pointers and sizes to release these allocations. */
+ * including those in node and edge records. The object is a view into storage
+ * managed by pbqp_problem_free. */
 typedef struct pbqp_problem {
   size_t num_nodes;
   size_t num_edges;
@@ -204,7 +204,7 @@ pbqp_status pbqp_solve_bruteforce(const pbqp_problem *problem,
 
 /* Called synchronously after each completed integer percentage, from 1
  * through 100, at most once per percentage. Several percentages may complete
- * on one tuple for small search spaces. user_data is borrowed for the call.
+ * on one tuple or pruned subtree. user_data is borrowed for the call.
  * A callback must not throw exceptions or modify the problem or its arrays. */
 typedef void (*pbqp_progress_callback)(unsigned percent, void *user_data);
 
@@ -220,6 +220,29 @@ pbqp_status pbqp_solve_bruteforce_with_progress(const pbqp_problem *problem,
                                                 void *user_data,
                                                 pbqp_solution **out,
                                                 pbqp_error *error);
+
+/* Exact branch-and-bound with the same validation, ownership, evaluation,
+ * output, and diagnostic contracts as pbqp_solve_bruteforce. Nodes and options
+ * are visited in ID order, retaining the first lexicographic minimum.
+ * Greedy supplies an initial upper bound when it finds a feasible solution.
+ * Prunes bounds > the upper bound until exact search finds a feasible tuple,
+ * then prunes bounds >= it; this preserves the first lexicographic minimum.
+ * Lower bounds sum independent term minima in reference evaluation order;
+ * negative costs and floating-point overflow remain supported. On PBQP_OK,
+ * quality is PBQP_SOLUTION_OPTIMAL under the reference float semantics.
+ * Returns PBQP_INFEASIBLE only after proving no feasible assignment exists. */
+pbqp_status pbqp_solve_branch_and_bound(const pbqp_problem *problem,
+                                        pbqp_solution **out, pbqp_error *error);
+
+/* Optional progress callback for branch-and-bound. Reports the same 1..100
+ * percentages as exhaustive search, counting all tuples in completely searched
+ * or pruned prefix subtrees. A pruned subtree can complete many percentages
+ * at once. Percentages measure covered search space, not time or visited
+ * search nodes. NULL disables reporting. Before-search errors report nothing;
+ * successful search or an infeasibility proof reports 100. */
+pbqp_status pbqp_solve_branch_and_bound_with_progress(
+    const pbqp_problem *problem, pbqp_progress_callback progress,
+    void *user_data, pbqp_solution **out, pbqp_error *error);
 
 /* Validates and borrows inputs with the same ownership rules as brute force.
  * Visits nodes by descending (maximum - minimum) finite unary cost, breaking

@@ -70,18 +70,27 @@
 - `src/io.cpp`: C text input/output entry points and error translation.
 - `src/error.cppm`: private `:error` partition with non-throwing diagnostics.
 - `src/failure.cppm`: private `:failure` partition for parsing/validation errors.
-- `src/ownership.cppm`: private `:ownership` partition with RAII aliases.
+- `src/api_boundary.cppm`: shared C API exception translation, including
+  allocation failures and container size limits.
+- `src/ownership.cppm`: vector-backed problem and solution storage behind C
+  views, with RAII ownership helpers.
 - `src/evaluation.cppm`: shared reference evaluator for validated assignments.
 - `src/progress.cppm`: exact percentage boundaries for mixed-radix enumeration
   without multiplying domain sizes into a fixed-width counter.
 - `src/solution.cpp`: public assignment evaluator and solution destruction.
-- `src/bruteforce.cpp`: exhaustive reference solver; uses no exceptions.
+- `src/bruteforce.cpp`: validation and ownership boundary for exhaustive search.
+- `src/bruteforce.cppm`: private `:bruteforce` partition with vector workspace
+  and allocation-free lexicographic reference enumeration.
+- `src/branch_and_bound.cpp`: validation and ownership boundary for exact search.
+- `src/branch_and_bound.cppm`: private `:branch_and_bound` partition with cached
+  unary, matrix, and row minima and iterative lexicographic depth-first search.
 - `src/greedy.cpp`: validation and ownership boundary for the greedy C API.
 - `src/greedy.cppm`: private `:greedy` partition with `GreedySearch`, separating
   workspace allocation, node priorities, edge indexing, option scoring, and
   assignment. Preparation allocates all search storage; `run` does not allocate,
   backtrack, or claim optimality.
-- `tools/pbqp.cpp`: named solver selection and solver CLI.
+- `tools/pbqp.cpp`: named solver selection and solver CLI. Exception handling
+  covers C++ argument parsing only; C API calls report statuses.
 - `tools/command_line.cppm`: shared `pbqp.command_line` module for named options,
   help flags, duplicate detection, and positional input paths.
 - `tools/generator.cppm`: public `pbqp.generator` module containing generator
@@ -102,8 +111,8 @@ Keep borrowed inputs alive and unchanged until the call returns.
 
 Only `pbqp_read` results may be passed to `pbqp_problem_free`, apart from
 `NULL`. Treat parsed objects and their arrays as read-only: preserve pointers,
-counts, dimensions, and node/edge metadata because destruction uses these
-fields. Caller-owned views must never be passed to this deleter.
+counts, dimensions, and node/edge metadata. Internal vectors own the storage
+behind these C views. Caller-owned views must never be passed to this deleter.
 
 Only solver-returned solutions may be passed to `pbqp_solution_free`, apart
 from `NULL`. Preserve their original `options` pointer. Solutions outlive
@@ -117,9 +126,14 @@ Actual pointer validity and allocation lengths cannot be inferred: callers
 must supply readable arrays with at least the declared lengths.
 
 No C++ exception may escape the C API. Parsing and validation may use internal
-exceptions translated at the boundary. Do not add `-fno-exceptions`; modules
-use consistent compiler options. The solver itself must use status returns;
-do not add exceptions, allocation, or validation inside the tuple loop.
+exceptions translated by the shared `api_call` boundary. Use `std::vector`
+for owned arrays, including solver workspace and storage backing returned C
+objects. Preparation may allocate and throw; translate `std::bad_alloc` to
+`PBQP_NO_MEMORY` and `std::length_error` to `PBQP_OVERFLOW` only at the boundary.
+Do not duplicate allocation checks in solver logic. Retain `std::unique_ptr`
+for individual owned objects. Do not add `-fno-exceptions`; modules use
+consistent compiler options. Search uses status returns; do not add exceptions,
+allocation, or validation inside search loops.
 
 For APIs returning owned objects, set output pointers to NULL on failure.
 Clear structured evaluation outputs on failure. A supplied
@@ -158,7 +172,7 @@ optimum or solves the empty problem.
 `pbqp_evaluate_assignment` validates inputs and indices, then reports both a
 reference-order cost and an independent `is_feasible` flag. A forbidden tuple
 is reported successfully with `is_feasible == 0`, not as problem-level
-infeasibility. Both solvers use its shared internal evaluator for reported
+infeasibility. All solvers use its shared internal evaluator for reported
 costs. OPTIMAL refers only to this sequentially rounded evaluation policy,
 not an exact real sum. Regrouping float arithmetic can change the optimum;
 merely recomputing the final assignment's cost does not prove optimality.
@@ -171,8 +185,30 @@ rows and target columns even when the target is assigned before the source.
 Edge indices are sorted once by the assignment step of their later endpoint
 and then original edge index, so sparse search does not rescan every edge for
 every node. Allocate scratch storage before the node/option loops. A dead end
-terminates with NO_SOLUTION. On example 2, greedy must color nodes 1, 3, and 5
+terminates with NO_SOLUTION. On `02_greedy_exact.pbqp`, greedy must color nodes 1, 3, and 5
 before spilling node 4, for total cost 40; its result quality remains FEASIBLE.
+
+Branch-and-bound assigns nodes and options in ID order and retains the first
+lexicographic optimum. Its lower bound substitutes each unresolved term with
+an independent minimum, then adds all terms in reference evaluation order.
+Use selected matrix entries for fully assigned edges, row minima for assigned
+sources, and matrix minima otherwise. Since src < tgt, assigned prefixes need
+no column minima. Rounded addition is monotone for these finite input terms;
+this establishes a bound despite negative costs or infinite accumulated sums.
+Do not regroup suffix sums or prune solely on the partial assigned cost.
+An explicit INF term proves a prefix impossible, but accumulated infinity
+alone does not. Run greedy during preparation to seed the upper bound using
+its reference-order solution cost. A heuristic dead end supplies no bound;
+continue exact search without treating it as infeasibility. Start with positive
+infinity if no seed exists. Before the first feasible tuple found by exact
+search, prune only when `L > G`: greedy's assignment may follow an earlier
+equal optimum. After exact search finds a feasible tuple, prune `L >= G`, since
+subsequent tied tuples cannot precede the incumbent. Lower G on each improvement.
+This preserves lexicographic tie-breaking while closing equal-cost subtrees
+without enumeration.
+Cache minima and allocate all storage before iterative search. No recursion,
+allocation, or exceptions are needed inside search. See
+`doc/solvers.md` for the numerical argument and progress policy.
 
 Input accepts decimal fractions and scientific notation. Keep the classic
 locale for serialization and use `max_digits10` precision so finite float
@@ -188,23 +224,30 @@ reusable generator library; `pbqp_generate` is its CLI. Both tools link the
 shared `pbqp_command_line` library for argument parsing.
 
 Invoke the solver as `pbqp --solve=naive INPUT`. `pbqp --help` lists available
-solvers: `naive` selects exhaustive search, `greedy` selects the heuristic. Do not
+solvers: `naive` selects exhaustive search, `bnb` exact branch-and-bound, and
+`greedy` the heuristic. Do not
 reintroduce `solve` or `dump` positional subcommands. Problem dumping remains
 available to library users through `pbqp_write`.
-`--heartbeat` is a valueless flag for `naive`. It writes one flushed dot to
+`--heartbeat` is a valueless flag for `naive` and `bnb`. It writes one flushed dot to
 stderr for each completed integer percentage, from 1 through 100, followed by
 a newline at completion. Count all tuples, including forbidden assignments.
 The first dot is emitted after ceil(total / 100) visited tuples; no zero-percent
-notification is sent. Small search spaces may cross several percentages on
-one tuple. Progress counts work, not elapsed time or an ETA.
+notification is sent. For branch-and-bound, count all tuples in fully searched
+or pruned subtrees, so a single cut may cross many percentage boundaries.
+Small search spaces may cross several percentages on one tuple. Progress
+counts covered space, not elapsed time or an ETA.
 
 The library exposes `pbqp_solve_bruteforce_with_progress` with an optional
-synchronous C callback. Keep terminal output in the CLI. Callbacks must not
+synchronous C callback, and the corresponding
+`pbqp_solve_branch_and_bound_with_progress` entry point. Keep terminal output
+in the CLI. Callbacks must not
 throw or mutate the input. Progress scratch storage is allocated before
 enumeration. The no-progress path uses a compiled-away observer, with no
 per-tuple progress branch. Preserve exact boundaries even if the domain-size
 product exceeds size_t or uint64_t; do not saturate the total or report fake
 early percentages. The mixed-radix boundary is ceil(total * p / 100) - 1.
+`PercentProgress::completed_prefix` compares boundaries against the final
+tuple of a closed prefix, implicitly treating its unassigned suffix as maximal.
 
 The solver CLI prints `COST <cost>` and zero-based `NODE <id> <option>` records.
 Exit codes are 0 for success, 1 for errors, 2 for proven infeasibility, and
@@ -273,7 +316,8 @@ ctest --test-dir build-clang-modules --output-on-failure
 
 Checks remain active in Release builds. Preserve the C interoperability test,
 float round trips, and independent recursive comparisons on generated small
-problems. Current example optima are 0, 40, and 80 for examples 1, 2, and 3.
+problems. Current example optima are 0, 40, and 80 for `01_basic.pbqp`, `02_greedy_exact.pbqp`,
+and `03_greedy_inexact.pbqp`, respectively.
 The recursive oracle evaluates complete tuples in reference summation order
 and tracks feasibility separately from the best cost; it also covers ordinary
 non-exact float sums and infinite accumulated values. Keep it independent of
@@ -285,8 +329,16 @@ cleanup tests, I/O failures (including `/dev/full` when available), greedy
 traps, and sparse graph generation without quadratic pair scans.
 Heartbeat tests cover the C callback, unchanged solver output, the complete
 1..100 notification sequence, empty and infeasible searches, and no early
-progress on a timed-out 2^65-tuple search. Do not run example 5's complete
+progress on a timed-out 2^65-tuple search. Do not run `05_too_long_for_naive.pbqp`'s complete
 2,176,782,336-tuple enumeration as a routine CTest entry.
+Preserve greedy-seed regressions for dead ends, suboptimal initial solutions,
+lexicographic ties, reference rounding, and infinite accumulated seed costs.
+Compare branch-and-bound with both naive and the independent oracle on all
+small generator families, including fractional spill costs and extreme float
+values. Preserve targeted negative-edge and cancellation regressions; a
+reassociated or partial-only bound must not discard a better solution.
+Check 100 callbacks on huge feasible and root-infeasible 2^65-tuple spaces
+that branch-and-bound can close quickly.
 
 For memory-sensitive changes, an additional sanitizer build is useful:
 

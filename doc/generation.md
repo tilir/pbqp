@@ -50,7 +50,8 @@ Every edge has a square conflict matrix. For three registers it is:
 ```
 
 Spill's row and column are zero; choosing the same register at both endpoints
-is forbidden. This is the cost structure used by examples 2 and 3. Assigning
+is forbidden. This is the cost structure used by `examples/02_greedy_exact.pbqp` and
+`examples/03_greedy_inexact.pbqp`. Assigning
 spill to every node is always allowed, and the greedy solver always finds an
 assignment in this family. Greedy may spill expensive nodes unnecessarily;
 the exhaustive solver is suitable for comparisons on small instances only.

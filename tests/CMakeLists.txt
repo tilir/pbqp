@@ -27,6 +27,6 @@ add_test(NAME c_api COMMAND test_c_api)
 add_test(NAME cli COMMAND "${CMAKE_COMMAND}"
   "-DPBQP=$<TARGET_FILE:pbqp_cli>"
   "-DGENERATOR=$<TARGET_FILE:pbqp_generate>"
-  "-DEXAMPLE=${PROJECT_SOURCE_DIR}/examples/1.pbqp"
+  "-DEXAMPLE=${PROJECT_SOURCE_DIR}/examples/01_basic.pbqp"
   "-DWORK=${PROJECT_BINARY_DIR}/cli-test"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/cli.cmake")

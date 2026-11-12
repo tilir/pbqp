@@ -1,5 +1,5 @@
 /*
- * Percentage boundaries for exhaustive mixed-radix enumeration.
+ * Percentage boundaries for mixed-radix search-space coverage.
  *
  * Computes exact tuple indices without forming the product of domain sizes.
  * A caller-provided boundary buffer keeps progress allocation out of search.
@@ -48,10 +48,11 @@ class PercentProgress {
     }
   }
 
-  bool reached(const size_t *tuple) const noexcept {
-    for (size_t k = 0; k < problem.num_nodes; ++k)
+  bool reached(const size_t *tuple, size_t depth) const noexcept {
+    for (size_t k = 0; k < depth; ++k)
       if (tuple[k] != boundary[k])
-        return false;
+        return boundary[k] < tuple[k];
+    // A closed prefix covers every suffix, including its final tuple.
     return true;
   }
 
@@ -63,7 +64,11 @@ public:
   }
 
   void completed(const size_t *tuple) noexcept {
-    while (next_percent <= 100 && reached(tuple)) {
+    completed_prefix(tuple, problem.num_nodes);
+  }
+
+  void completed_prefix(const size_t *tuple, size_t depth) noexcept {
+    while (next_percent <= 100 && reached(tuple, depth)) {
       callback(next_percent, user_data);
       ++next_percent;
       if (next_percent <= 100)

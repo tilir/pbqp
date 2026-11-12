@@ -19,10 +19,12 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <random>
 #include <source_location>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 import pbqp.generator;
@@ -99,18 +101,23 @@ static void check_roundtrip(const pbqp_problem *p) {
 }
 
 static void test_examples() {
+  constexpr const char *paths[] = {"examples/01_basic.pbqp",
+                                   "examples/02_greedy_exact.pbqp",
+                                   "examples/03_greedy_inexact.pbqp"};
   const pbqp_cost_t expected[] = {0, 40, 80};
   const pbqp_cost_t greedy_expected[] = {0, 40, 130};
   for (size_t k = 0; k < 3; ++k) {
     pbqp_problem *p = nullptr;
     pbqp_solution *s = nullptr;
     pbqp_error error;
-    auto path = "examples/" + std::to_string(k + 1) + ".pbqp";
-    check(pbqp_read(path.c_str(), &p, &error) == PBQP_OK);
+    check(pbqp_read(paths[k], &p, &error) == PBQP_OK);
     check_roundtrip(p);
     check(pbqp_solve_bruteforce(p, &s, &error) == PBQP_OK);
     check(s->cost == expected[k]);
     check(s->quality == PBQP_SOLUTION_OPTIMAL);
+    pbqp_solution_free(s);
+    check(pbqp_solve_branch_and_bound(p, &s, &error) == PBQP_OK);
+    check(s->cost == expected[k] && s->quality == PBQP_SOLUTION_OPTIMAL);
     pbqp_solution_free(s);
     check(pbqp_solve_greedy(p, &s, &error) == PBQP_OK);
     check(s->quality == PBQP_SOLUTION_FEASIBLE &&
@@ -148,15 +155,17 @@ static void solve_text(const std::string &text, pbqp_status expected,
   size_t k;
   check(read_text(text, &p, nullptr) == PBQP_OK);
   check_roundtrip(p);
-  check(pbqp_solve_bruteforce(p, &s, nullptr) == expected);
-  if (expected == PBQP_OK) {
-    check(s && s->cost == cost && s->num_nodes == p->num_nodes);
-    check(s->quality == PBQP_SOLUTION_OPTIMAL);
-    for (k = 0; options && k < s->num_nodes; ++k)
-      check(s->options[k] == options[k]);
-  } else
-    check(!s);
-  pbqp_solution_free(s);
+  for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_branch_and_bound}) {
+    check(solve(p, &s, nullptr) == expected);
+    if (expected == PBQP_OK) {
+      check(s && s->cost == cost && s->num_nodes == p->num_nodes);
+      check(s->quality == PBQP_SOLUTION_OPTIMAL);
+      for (k = 0; options && k < s->num_nodes; ++k)
+        check(s->options[k] == options[k]);
+    } else
+      check(!s);
+    pbqp_solution_free(s);
+  }
   pbqp_problem_free(p);
 }
 
@@ -396,42 +405,46 @@ static void check_reference(const pbqp_problem &p) {
     }
   };
   visit(0);
-  pbqp_solution *raw = nullptr;
-  auto status = pbqp_solve_bruteforce(&p, &raw, nullptr);
   const auto free_solution = [](pbqp_solution *s) noexcept {
     pbqp_solution_free(s);
   };
-  std::unique_ptr<pbqp_solution, decltype(free_solution)> solution(
-      raw, free_solution);
-  bool matches = found ? status == PBQP_OK && solution &&
-                             solution->cost == optimum &&
-                             solution->num_nodes == best.size()
-                       : status == PBQP_INFEASIBLE && !solution;
-  if (found && matches)
-    for (size_t k = 0; k < p.num_nodes; ++k)
-      matches &= solution->options[k] == best[k];
-  if (!matches) {
-    auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    auto path = std::filesystem::temp_directory_path() /
-                ("pbqp-mismatch-" + std::to_string(stamp) + ".pbqp");
-    pbqp_error error{};
-    auto written = pbqp_write(path.string().c_str(), &p, &error);
-    std::cerr << "Case: " << case_context << "\nExpected feasible=" << found
-              << " cost=" << optimum << " options:";
-    for (auto option : best)
-      std::cerr << ' ' << option;
-    std::cerr << "\nActual status=" << status;
-    if (solution) {
-      std::cerr << " cost=" << solution->cost << " options:";
-      for (size_t k = 0; k < solution->num_nodes; ++k)
-        std::cerr << ' ' << solution->options[k];
+  auto verify_exact = [&](auto solve, std::string_view name) {
+    pbqp_solution *raw = nullptr;
+    auto status = solve(&p, &raw, nullptr);
+    std::unique_ptr<pbqp_solution, decltype(free_solution)> solution(
+        raw, free_solution);
+    bool matches = found ? status == PBQP_OK && solution &&
+                               solution->cost == optimum &&
+                               solution->num_nodes == best.size()
+                         : status == PBQP_INFEASIBLE && !solution;
+    if (found && matches)
+      for (size_t k = 0; k < p.num_nodes; ++k)
+        matches &= solution->options[k] == best[k];
+    if (!matches) {
+      auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+      auto path = std::filesystem::temp_directory_path() /
+                  ("pbqp-mismatch-" + std::to_string(stamp) + ".pbqp");
+      pbqp_error error{};
+      auto written = pbqp_write(path.string().c_str(), &p, &error);
+      std::cerr << "Case: " << case_context << "\nExpected feasible=" << found
+                << " cost=" << optimum << " options:";
+      for (auto option : best)
+        std::cerr << ' ' << option;
+      std::cerr << "\nActual solver=" << name << " status=" << status;
+      if (solution) {
+        std::cerr << " cost=" << solution->cost << " options:";
+        for (size_t k = 0; k < solution->num_nodes; ++k)
+          std::cerr << ' ' << solution->options[k];
+      }
+      std::cerr << "\nProblem dump: "
+                << (written == PBQP_OK ? path.string() : error.message) << '\n';
     }
-    std::cerr << "\nProblem dump: "
-              << (written == PBQP_OK ? path.string() : error.message) << '\n';
-  }
-  check(matches);
-  if (solution)
-    check(solution->quality == PBQP_SOLUTION_OPTIMAL);
+    check(matches);
+    if (solution)
+      check(solution->quality == PBQP_SOLUTION_OPTIMAL);
+  };
+  verify_exact(pbqp_solve_bruteforce, "naive");
+  verify_exact(pbqp_solve_branch_and_bound, "bnb");
 
   pbqp_solution *greedy_raw = nullptr;
   auto greedy_status = pbqp_solve_greedy(&p, &greedy_raw, nullptr);
@@ -500,7 +513,8 @@ static void test_direct_api() {
     pbqp_error error{};
     check(pbqp_validate(&problem, &error) == PBQP_INVALID);
     check(error.message[0]);
-    for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_greedy}) {
+    for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_greedy,
+                       pbqp_solve_branch_and_bound}) {
       pbqp_solution *out = nullptr;
       check(solve(&problem, &out, &error) == PBQP_INVALID && !out);
     }
@@ -529,7 +543,8 @@ static void test_direct_api() {
   p.num_edges = 2;
   invalid(p);
   p.num_edges = 1;
-  for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_greedy})
+  for (auto solve :
+       {pbqp_solve_bruteforce, pbqp_solve_greedy, pbqp_solve_branch_and_bound})
     check(solve(&p, nullptr, nullptr) == PBQP_INVALID);
   check(pbqp_read("unused", nullptr, nullptr) == PBQP_INVALID);
   pbqp_problem empty{0, 0, nodes, edges};
@@ -569,11 +584,12 @@ static void test_direct_api() {
   pbqp_problem *parsed = nullptr;
   check(read_text("PBQP 1 NODES 1 EDGES 0 NODE 0 2 2 -3 END", &parsed,
                   nullptr) == PBQP_OK);
-  pbqp_solution *naive = nullptr, *greedy = nullptr;
+  pbqp_solution *naive = nullptr, *greedy = nullptr, *bounded = nullptr;
   check(pbqp_solve_bruteforce(parsed, &naive, nullptr) == PBQP_OK);
   check(pbqp_solve_greedy(parsed, &greedy, nullptr) == PBQP_OK);
+  check(pbqp_solve_branch_and_bound(parsed, &bounded, nullptr) == PBQP_OK);
   pbqp_problem_free(parsed);
-  for (auto solution : {naive, greedy}) {
+  for (auto solution : {naive, greedy, bounded}) {
     check(solution->num_nodes == 1 && solution->options[0] == 1 &&
           solution->cost == -3);
     pbqp_solution_free(solution);
@@ -656,6 +672,109 @@ static void test_io_failures() {
   std::string contents;
   in >> contents;
   check(contents == "preserve");
+}
+
+static void test_branch_and_bound_seed() {
+  const auto free_problem = [](pbqp_problem *p) noexcept {
+    pbqp_problem_free(p);
+  };
+  const auto free_solution = [](pbqp_solution *s) noexcept {
+    pbqp_solution_free(s);
+  };
+  auto verify = [&](const std::string &text, pbqp_status greedy_status,
+                    pbqp_cost_t greedy_cost,
+                    const std::vector<size_t> &greedy_options) {
+    pbqp_problem *raw_problem = nullptr;
+    check(read_text(text, &raw_problem, nullptr) == PBQP_OK);
+    std::unique_ptr<pbqp_problem, decltype(free_problem)> problem(raw_problem,
+                                                                  free_problem);
+    pbqp_solution *raw_solution = nullptr;
+    check(pbqp_solve_greedy(problem.get(), &raw_solution, nullptr) ==
+          greedy_status);
+    std::unique_ptr<pbqp_solution, decltype(free_solution)> greedy(
+        raw_solution, free_solution);
+    if (greedy_status == PBQP_OK) {
+      check(greedy->cost == greedy_cost &&
+            greedy->num_nodes == greedy_options.size());
+      check(std::equal(greedy_options.begin(), greedy_options.end(),
+                       greedy->options));
+    } else {
+      check(!greedy);
+    }
+    // Both exact solvers must match the independent oracle, including ties.
+    check_reference(*problem);
+    pbqp_error error{42, "old greedy diagnostic"};
+    check(pbqp_solve_branch_and_bound(problem.get(), &raw_solution, &error) ==
+          PBQP_OK);
+    std::unique_ptr<pbqp_solution, decltype(free_solution)> exact(
+        raw_solution, free_solution);
+    check(exact->quality == PBQP_SOLUTION_OPTIMAL && !error.line &&
+          !error.message[0]);
+  };
+  // Greedy gets trapped; B&B must continue and find the only feasible tuple.
+  verify("PBQP 1 NODES 2 EDGES 1 NODE 0 2 0 1 NODE 1 1 0 EDGE 0 1 INF 0 END",
+         PBQP_NO_SOLUTION, 0, {});
+  // Greedy's initial upper bound is feasible but requires exact improvement.
+  verify("PBQP 1 NODES 2 EDGES 1 NODE 0 2 0 1 NODE 1 2 0 0 "
+         "EDGE 0 1 10 10 0 0 END",
+         PBQP_OK, 10, {0, 0});
+  // Reference rounding makes greedy's later tuple tie the first optimum.
+  verify("PBQP 1 NODES 3 EDGES 0 NODE 0 1 16777216 NODE 1 2 1 0 "
+         "NODE 2 1 -16777216 END",
+         PBQP_OK, 0, {0, 1, 0});
+  // An infinite seed is feasible; it must not hide an earlier equal tuple.
+  verify("PBQP 1 NODES 2 EDGES 0 NODE 0 2 3e38 2e38 NODE 1 1 3e38 END", PBQP_OK,
+         PBQP_INF, {1, 0});
+  verify("PBQP 1 NODES 2 EDGES 0 NODE 0 2 -2e38 -3e38 NODE 1 1 -3e38 END",
+         PBQP_OK, -PBQP_INF, {1, 0});
+}
+
+static void test_branch_and_bound_bounds() {
+  const size_t choice[] = {1, 0};
+  // A positive assigned unary cost cannot justify pruning a negative edge.
+  solve_text("PBQP 1 NODES 2 EDGES 1 NODE 0 2 0 10 NODE 1 1 0 "
+             "EDGE 0 1 0 -100 END",
+             PBQP_OK, -90, choice);
+  // Regrouping the two remaining unary costs would produce an unsafe bound
+  // of 1 instead of 0 for the better branch, after finding incumbent 0.5.
+  const size_t rounded_choice[] = {1, 0, 0};
+  solve_text("PBQP 1 NODES 3 EDGES 1 NODE 0 2 16777216 16777216 "
+             "NODE 1 1 1 NODE 2 1 -16777216 EDGE 0 2 0.5 0 END",
+             PBQP_OK, 0, rounded_choice);
+  const auto maximum = std::numeric_limits<pbqp_cost_t>::max();
+  const std::vector<pbqp_cost_t> pool{
+      0,         0.5f,
+      -0.5f,     1,
+      -1,        16777216,
+      -16777216, maximum,
+      -maximum,  std::numeric_limits<pbqp_cost_t>::denorm_min(),
+      PBQP_INF};
+  for (unsigned seed = 0; seed < 250; ++seed) {
+    case_context = "float-bound seed=" + std::to_string(seed);
+    std::mt19937 random(seed);
+    std::vector<std::vector<pbqp_cost_t>> unary(4, std::vector<pbqp_cost_t>(2));
+    std::vector<std::vector<pbqp_cost_t>> pairwise(6,
+                                                   std::vector<pbqp_cost_t>(4));
+    std::vector<pbqp_node> nodes;
+    std::vector<pbqp_edge> edges;
+    for (auto &costs : unary) {
+      for (auto &cost : costs)
+        cost = pool[random() % pool.size()];
+      nodes.push_back({2, costs.data()});
+    }
+    for (size_t src = 0; src < 4; ++src)
+      for (size_t tgt = src + 1; tgt < 4; ++tgt) {
+        auto &costs = pairwise[edges.size()];
+        for (auto &cost : costs)
+          cost = pool[random() % pool.size()];
+        edges.push_back({src, tgt, costs.data()});
+      }
+    if (seed % 2)
+      std::reverse(edges.begin(), edges.end());
+    pbqp_problem p{nodes.size(), edges.size(), nodes.data(), edges.data()};
+    check_reference(p);
+  }
+  case_context.clear();
 }
 
 static void test_generator_families() {
@@ -761,38 +880,41 @@ static void test_progress() {
       // Make the complete space forbidden while still reporting all work.
       if (forbidden && !costs.empty())
         std::fill(costs.back().begin(), costs.back().end(), PBQP_INF);
-      ProgressLog log;
-      pbqp_solution *progress = nullptr, *plain = nullptr;
-      auto status = pbqp_solve_bruteforce_with_progress(
-          &p, collect_progress, &log, &progress, nullptr);
-      check(status == pbqp_solve_bruteforce(&p, &plain, nullptr));
-      check(log.count == 100);
-      for (unsigned i = 0; i < 100; ++i)
-        check(log.percentages[i] == i + 1);
-      if (plain) {
-        check(progress && progress->cost == plain->cost &&
-              progress->quality == plain->quality);
-        for (size_t k = 0; k < p.num_nodes; ++k)
-          check(progress->options[k] == plain->options[k]);
-      } else
-        check(!progress && status == PBQP_INFEASIBLE);
-      pbqp_solution_free(plain);
-      pbqp_solution_free(progress);
+      for (auto solve : {pbqp_solve_bruteforce_with_progress,
+                         pbqp_solve_branch_and_bound_with_progress}) {
+        ProgressLog log;
+        pbqp_solution *progress = nullptr, *plain = nullptr;
+        auto status = solve(&p, collect_progress, &log, &progress, nullptr);
+        check(status == pbqp_solve_bruteforce(&p, &plain, nullptr));
+        check(log.count == 100);
+        for (unsigned i = 0; i < 100; ++i)
+          check(log.percentages[i] == i + 1);
+        if (plain) {
+          check(progress && progress->cost == plain->cost &&
+                progress->quality == plain->quality);
+          for (size_t k = 0; k < p.num_nodes; ++k)
+            check(progress->options[k] == plain->options[k]);
+        } else
+          check(!progress && status == PBQP_INFEASIBLE);
+        pbqp_solution_free(plain);
+        pbqp_solution_free(progress);
+      }
     }
   }
-  ProgressLog log;
-  pbqp_solution *solution = nullptr;
-  check(pbqp_solve_bruteforce_with_progress(nullptr, collect_progress, &log,
-                                            &solution,
-                                            nullptr) == PBQP_INVALID);
-  check(!solution && log.count == 0);
-  pbqp_problem empty{};
-  check(pbqp_solve_bruteforce_with_progress(&empty, collect_progress, &log,
-                                            nullptr, nullptr) == PBQP_INVALID);
-  check(log.count == 0);
-  check(pbqp_solve_bruteforce_with_progress(&empty, nullptr, nullptr, &solution,
-                                            nullptr) == PBQP_OK);
-  pbqp_solution_free(solution);
+  for (auto solve : {pbqp_solve_bruteforce_with_progress,
+                     pbqp_solve_branch_and_bound_with_progress}) {
+    ProgressLog log;
+    pbqp_solution *solution = nullptr;
+    check(solve(nullptr, collect_progress, &log, &solution, nullptr) ==
+          PBQP_INVALID);
+    check(!solution && log.count == 0);
+    pbqp_problem empty{};
+    check(solve(&empty, collect_progress, &log, nullptr, nullptr) ==
+          PBQP_INVALID);
+    check(log.count == 0);
+    check(solve(&empty, nullptr, nullptr, &solution, nullptr) == PBQP_OK);
+    pbqp_solution_free(solution);
+  }
 }
 
 int main() {
@@ -809,6 +931,8 @@ int main() {
     test_io_failures();
     test_generator_families();
     test_progress();
+    test_branch_and_bound_seed();
+    test_branch_and_bound_bounds();
     std::cout << "All PBQP tests passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

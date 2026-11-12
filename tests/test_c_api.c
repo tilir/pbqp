@@ -48,10 +48,23 @@ int main(void) {
          evaluation.is_feasible && evaluation.cost == -2;
   }
   pbqp_solution_free(solution);
+  if (!ok || pbqp_solve_branch_and_bound(&problem, &solution, NULL) != PBQP_OK)
+    return 1;
+  ok = solution->quality == PBQP_SOLUTION_OPTIMAL && solution->cost == -2 &&
+       solution->options[0] == 1;
+  pbqp_solution_free(solution);
   {
     progress_log log = {0, 0};
     if (pbqp_solve_bruteforce_with_progress(&problem, record_progress, &log,
                                             &solution, NULL) != PBQP_OK)
+      return 1;
+    ok = ok && log.count == 100 && !log.invalid && solution->cost == -2;
+    pbqp_solution_free(solution);
+  }
+  {
+    progress_log log = {0, 0};
+    if (pbqp_solve_branch_and_bound_with_progress(
+            &problem, record_progress, &log, &solution, NULL) != PBQP_OK)
       return 1;
     ok = ok && log.count == 100 && !log.invalid && solution->cost == -2;
     pbqp_solution_free(solution);

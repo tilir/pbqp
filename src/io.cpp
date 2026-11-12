@@ -15,10 +15,12 @@ module;
 #include <iomanip>
 #include <limits>
 #include <locale>
+#include <memory>
 #include <set>
 #include <utility>
 
 module pbqp;
+import :api_boundary;
 import :problem;
 import :failure;
 import :error;
@@ -34,50 +36,47 @@ void write_cost(std::ostream &output, pbqp_cost_t cost) {
 
 extern "C" {
 pbqp_status pbqp_read(const char *path, pbqp_problem **out, pbqp_error *error) {
-  pbqp_clear_error(error);
   if (out)
     *out = nullptr;
-  if (!path || !out)
-    return pbqp_fail(error, PBQP_INVALID, 0, "missing path or output pointer");
-  try {
+  return api_call(error, [&]() -> pbqp_status {
+    if (!path || !out)
+      return pbqp_fail(error, PBQP_INVALID, 0,
+                       "missing path or output pointer");
     std::ifstream input(path, std::ios::binary);
     if (!input)
       fail(PBQP_IO_ERROR, "cannot open input file");
     TextReader r(input);
-    ProblemPtr p(new pbqp_problem{}, problem_deleter);
     r.expect("PBQP");
     r.expect("1");
     r.expect("NODES");
-    p->num_nodes = r.size();
+    size_t num_nodes = r.size();
     r.expect("EDGES");
-    p->num_edges = r.size();
-    check_count<pbqp_node>(p->num_nodes, r.token_line());
-    check_count<pbqp_edge>(p->num_edges, r.token_line());
-    auto *nodes = p->num_nodes ? new pbqp_node[p->num_nodes]{} : nullptr;
-    p->nodes = nodes;
-    auto *edge_records = p->num_edges ? new pbqp_edge[p->num_edges]{} : nullptr;
-    p->edges = edge_records;
+    size_t num_edges = r.size();
+    check_count<pbqp_node>(num_nodes, r.token_line());
+    check_count<pbqp_edge>(num_edges, r.token_line());
+    auto p = std::make_unique<ProblemStorage>(num_nodes, num_edges);
     for (size_t k = 0; k < p->num_nodes; ++k) {
       r.expect("NODE");
       if (r.size() != k)
         fail(PBQP_INVALID,
              "nodes must be numbered in increasing order from zero",
              r.token_line());
-      auto &node = nodes[k];
+      auto &node = p->node_records[k];
       node.num_options = r.size();
       if (!node.num_options)
         fail(PBQP_INVALID, "node must have at least one option",
              r.token_line());
       check_count<pbqp_cost_t>(node.num_options, r.token_line());
-      auto *costs = new pbqp_cost_t[node.num_options];
-      node.costs = costs;
+      auto &costs = p->unary_costs[k];
+      costs.resize(node.num_options);
+      node.costs = costs.data();
       for (size_t a = 0; a < node.num_options; ++a)
         costs[a] = r.cost();
     }
     std::set<std::pair<size_t, size_t>> edges;
     for (size_t k = 0; k < p->num_edges; ++k) {
       r.expect("EDGE");
-      auto &e = edge_records[k];
+      auto &e = p->edge_records[k];
       e.src = r.size();
       e.tgt = r.size();
       if (e.src >= e.tgt || e.tgt >= p->num_nodes)
@@ -86,8 +85,9 @@ pbqp_status pbqp_read(const char *path, pbqp_problem **out, pbqp_error *error) {
       if (!edges.emplace(e.src, e.tgt).second)
         fail(PBQP_INVALID, "duplicate edge", r.token_line());
       size_t count = matrix_size(*p, e, r.token_line());
-      auto *costs = new pbqp_cost_t[count];
-      e.costs = costs;
+      auto &costs = p->pairwise_costs[k];
+      costs.resize(count);
+      e.costs = costs.data();
       for (size_t a = 0; a < count; ++a)
         costs[a] = r.cost();
     }
@@ -96,17 +96,12 @@ pbqp_status pbqp_read(const char *path, pbqp_problem **out, pbqp_error *error) {
       fail(PBQP_INVALID, "unexpected data after END", r.token_line());
     *out = p.release();
     return PBQP_OK;
-  } catch (const Failure &f) {
-    return pbqp_fail(error, f.status, f.line, f.message);
-  } catch (const std::bad_alloc &) {
-    return pbqp_fail(error, PBQP_NO_MEMORY, 0, "allocation failed");
-  }
+  });
 }
 
 pbqp_status pbqp_write(const char *path, const pbqp_problem *p,
                        pbqp_error *error) {
-  pbqp_clear_error(error);
-  try {
+  return api_call(error, [&]() -> pbqp_status {
     validate(p);
     if (!path)
       fail(PBQP_INVALID, "missing output path");
@@ -140,10 +135,6 @@ pbqp_status pbqp_write(const char *path, const pbqp_problem *p,
     if (!output)
       fail(PBQP_IO_ERROR, "output write failed");
     return PBQP_OK;
-  } catch (const Failure &f) {
-    return pbqp_fail(error, f.status, f.line, f.message);
-  } catch (const std::bad_alloc &) {
-    return pbqp_fail(error, PBQP_NO_MEMORY, 0, "allocation failed");
-  }
+  });
 }
 } // extern "C"

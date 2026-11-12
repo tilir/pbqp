@@ -13,11 +13,9 @@ module;
 
 #include "pbqp.h"
 #include <algorithm>
-#include <limits>
-#include <memory>
-#include <new>
 #include <numeric>
 #include <span>
+#include <vector>
 
 module pbqp:greedy;
 import :error;
@@ -31,16 +29,15 @@ class GreedySearch {
   };
 
   const pbqp_problem &problem;
-  SolutionPtr solution{nullptr, solution_deleter};
-  std::unique_ptr<NodePriority[]> order;
-  std::unique_ptr<size_t[]> rank;
-  std::unique_ptr<size_t[]> incident;
+  SolutionPtr solution;
+  std::vector<NodePriority> order;
+  std::vector<size_t> rank;
+  std::vector<size_t> incident;
 
   static bool unary_cost_range(const pbqp_node &node,
                                pbqp_cost_t &range) noexcept;
-  pbqp_status allocate_solution(pbqp_error *error) noexcept;
   pbqp_status order_nodes(pbqp_error *error) noexcept;
-  pbqp_status index_edges(pbqp_error *error) noexcept;
+  void index_edges() noexcept;
   size_t later_step(size_t edge) const noexcept;
   bool score_option(size_t node, size_t option, std::span<const size_t> edges,
                     pbqp_cost_t &score) const noexcept;
@@ -48,8 +45,9 @@ class GreedySearch {
 
 public:
   explicit GreedySearch(const pbqp_problem &p) noexcept : problem(p) {}
-  pbqp_status prepare(pbqp_error *error) noexcept;
+  pbqp_status prepare(pbqp_error *error);
   pbqp_status run(pbqp_error *error) noexcept;
+  pbqp_cost_t solution_cost() const noexcept { return solution->cost; }
   pbqp_solution *release_solution() noexcept { return solution.release(); }
 };
 
@@ -73,26 +71,9 @@ bool GreedySearch::unary_cost_range(const pbqp_node &node,
   return found;
 }
 
-pbqp_status GreedySearch::allocate_solution(pbqp_error *error) noexcept {
-  solution.reset(new (std::nothrow) pbqp_solution{});
-  if (!solution)
-    return pbqp_fail(error, PBQP_NO_MEMORY, 0, "allocation failed");
-  solution->num_nodes = problem.num_nodes;
-  if (problem.num_nodes) {
-    solution->options = new (std::nothrow) size_t[problem.num_nodes];
-    if (!solution->options)
-      return pbqp_fail(error, PBQP_NO_MEMORY, 0, "allocation failed");
-  }
-  return PBQP_OK;
-}
-
 pbqp_status GreedySearch::order_nodes(pbqp_error *error) noexcept {
   if (!problem.num_nodes)
     return PBQP_OK;
-  order.reset(new (std::nothrow) NodePriority[problem.num_nodes]);
-  rank.reset(new (std::nothrow) size_t[problem.num_nodes]);
-  if (!order || !rank)
-    return pbqp_fail(error, PBQP_NO_MEMORY, 0, "allocation failed");
   for (size_t node = 0; node < problem.num_nodes; ++node) {
     pbqp_cost_t priority;
     if (!unary_cost_range(problem.nodes[node], priority))
@@ -101,7 +82,7 @@ pbqp_status GreedySearch::order_nodes(pbqp_error *error) noexcept {
                        "infeasibility is not proven");
     order[node] = {node, priority};
   }
-  std::sort(order.get(), order.get() + problem.num_nodes,
+  std::sort(order.begin(), order.end(),
             [](const NodePriority &a, const NodePriority &b) noexcept {
               if (a.priority != b.priority)
                 return a.priority > b.priority;
@@ -116,37 +97,28 @@ size_t GreedySearch::later_step(size_t edge) const noexcept {
   return std::max(rank[problem.edges[edge].src], rank[problem.edges[edge].tgt]);
 }
 
-pbqp_status GreedySearch::index_edges(pbqp_error *error) noexcept {
-  if (!problem.num_edges)
-    return PBQP_OK;
-  incident.reset(new (std::nothrow) size_t[problem.num_edges]);
-  if (!incident)
-    return pbqp_fail(error, PBQP_NO_MEMORY, 0, "allocation failed");
-  std::iota(incident.get(), incident.get() + problem.num_edges, size_t{0});
+void GreedySearch::index_edges() noexcept {
+  std::iota(incident.begin(), incident.end(), size_t{0});
   // Each edge contributes at its later endpoint's assignment step. Ties keep
   // original edge order so local floating-point sums remain unchanged.
-  std::sort(incident.get(), incident.get() + problem.num_edges,
+  std::sort(incident.begin(), incident.end(),
             [this](size_t a, size_t b) noexcept {
               if (later_step(a) != later_step(b))
                 return later_step(a) < later_step(b);
               return a < b;
             });
-  return PBQP_OK;
 }
 
-pbqp_status GreedySearch::prepare(pbqp_error *error) noexcept {
-  if (problem.num_nodes >
-          std::numeric_limits<size_t>::max() / sizeof(NodePriority) ||
-      problem.num_edges > std::numeric_limits<size_t>::max() / sizeof(size_t))
-    return pbqp_fail(error, PBQP_OVERFLOW, 0,
-                     "solver allocation size overflow");
-  auto status = allocate_solution(error);
+pbqp_status GreedySearch::prepare(pbqp_error *error) {
+  solution = make_solution(problem.num_nodes);
+  order.resize(problem.num_nodes);
+  rank.resize(problem.num_nodes);
+  incident.resize(problem.num_edges);
+  auto status = order_nodes(error);
   if (status != PBQP_OK)
     return status;
-  status = order_nodes(error);
-  if (status != PBQP_OK)
-    return status;
-  return index_edges(error);
+  index_edges();
+  return PBQP_OK;
 }
 
 bool GreedySearch::score_option(size_t node, size_t option,
@@ -190,9 +162,7 @@ pbqp_status GreedySearch::run(pbqp_error *error) noexcept {
     size_t begin = end;
     while (end < problem.num_edges && later_step(incident[end]) == step)
       ++end;
-    auto edges = begin == end ? std::span<const size_t>{}
-                              : std::span<const size_t>(incident.get() + begin,
-                                                        end - begin);
+    auto edges = std::span<const size_t>(incident).subspan(begin, end - begin);
     if (!assign_node(node, edges))
       return pbqp_fail(
           error, PBQP_NO_SOLUTION, 0,

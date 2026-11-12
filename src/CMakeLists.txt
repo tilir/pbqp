@@ -6,16 +6,20 @@ set(PBQP_LIBRARY_SOURCES
   problem_api.cpp
   io.cpp
   bruteforce.cpp
+  branch_and_bound.cpp
   greedy.cpp
   solution.cpp)
 set(PBQP_LIBRARY_MODULES
   pbqp.cppm
+  api_boundary.cppm
   error.cppm
   failure.cppm
   ownership.cppm
   problem.cppm
   text_reader.cppm
   evaluation.cppm
+  bruteforce.cppm
+  branch_and_bound.cppm
   greedy.cppm
   progress.cppm)
 add_library(pbqp ${PBQP_LIBRARY_SOURCES} ${PBQP_PUBLIC_HEADERS})

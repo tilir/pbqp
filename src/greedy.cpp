@@ -12,28 +12,29 @@ module;
 #include "pbqp.h"
 
 module pbqp;
+import :api_boundary;
 import :error;
+import :problem;
 import :greedy;
 
 extern "C" pbqp_status pbqp_solve_greedy(const pbqp_problem *p,
                                          pbqp_solution **out,
                                          pbqp_error *error) {
-  pbqp_clear_error(error);
   if (out)
     *out = nullptr;
-  if (!out)
-    return pbqp_fail(error, PBQP_INVALID, 0, "missing output pointer");
-  auto status = pbqp_validate(p, error);
-  if (status != PBQP_OK)
-    return status;
+  return api_call(error, [&]() -> pbqp_status {
+    if (!out)
+      return pbqp_fail(error, PBQP_INVALID, 0, "missing output pointer");
+    validate(p);
 
-  GreedySearch search(*p);
-  status = search.prepare(error);
-  if (status != PBQP_OK)
-    return status;
-  status = search.run(error);
-  if (status != PBQP_OK)
-    return status;
-  *out = search.release_solution();
-  return PBQP_OK;
+    GreedySearch search(*p);
+    auto status = search.prepare(error);
+    if (status != PBQP_OK)
+      return status;
+    status = search.run(error);
+    if (status != PBQP_OK)
+      return status;
+    *out = search.release_solution();
+    return PBQP_OK;
+  });
 }
