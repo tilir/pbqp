@@ -11,7 +11,6 @@
  */
 module;
 #include <cstddef>
-#include <functional>
 #include <oneapi/tbb/task_arena.h>
 #include <oneapi/tbb/task_group.h>
 
@@ -19,19 +18,19 @@ module pbqp;
 import :parallel;
 
 namespace pbqp {
-void run_parallel(std::size_t count,
-                  const std::function<void(std::size_t)> &consume) {
+void run_parallel(std::size_t count, void *context,
+                  void (*consume)(void *, std::size_t)) {
   if (!count)
     return;
   if (count == 1) {
-    consume(0);
+    consume(context, 0);
     return;
   }
   oneapi::tbb::task_arena arena(static_cast<int>(count));
   arena.execute([&] {
     oneapi::tbb::task_group group;
     for (std::size_t id = 0; id < count; ++id)
-      group.run([&, id] { consume(id); });
+      group.run([=] { consume(context, id); });
     group.wait();
   });
 }

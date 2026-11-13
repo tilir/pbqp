@@ -155,7 +155,8 @@ void solve_text(const std::string &text, pbqp_status expected, pbqp_cost_t cost,
   size_t k;
   check(read_text(text, &p, nullptr) == PBQP_OK);
   check_roundtrip(p);
-  for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_branch_and_bound}) {
+  for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_branch_and_bound,
+                     pbqp_solve_branch_and_bound_optimized}) {
     check(solve(p, &s, nullptr) == expected);
     if (expected == PBQP_OK) {
       check(s && s->cost == cost && s->num_nodes == p->num_nodes);
@@ -465,6 +466,7 @@ void check_reference(const pbqp_problem &p) {
   };
   verify_exact(pbqp_solve_bruteforce, "naive");
   verify_exact(pbqp_solve_branch_and_bound, "bnb", false);
+  verify_exact(pbqp_solve_branch_and_bound_optimized, "bnbopt", false);
   for (size_t threads : {size_t{2}, size_t{4}}) {
     auto parallel = [&](const pbqp_problem *p, pbqp_solution **out,
                         pbqp_error *error) {
@@ -472,6 +474,13 @@ void check_reference(const pbqp_problem &p) {
       return pbqp_solve_branch_and_bound_with_options(p, &options, out, error);
     };
     verify_exact(parallel, "parallel bnb", false);
+    auto optimized = [&](const pbqp_problem *p, pbqp_solution **out,
+                         pbqp_error *error) {
+      const pbqp_solve_options options{threads, nullptr, nullptr};
+      return pbqp_solve_branch_and_bound_optimized_with_options(p, &options,
+                                                                out, error);
+    };
+    verify_exact(optimized, "parallel bnbopt", false);
     auto exhaustive = [&](const pbqp_problem *p, pbqp_solution **out,
                           pbqp_error *error) {
       const pbqp_solve_options options{threads, nullptr, nullptr};
@@ -550,8 +559,9 @@ void test_direct_api() {
     pbqp_error error{};
     check(pbqp_validate(&problem, &error) == PBQP_INVALID);
     check(error.message[0]);
-    for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_greedy,
-                       pbqp_solve_branch_and_bound, pbqp_solve_reduction}) {
+    for (auto solve :
+         {pbqp_solve_bruteforce, pbqp_solve_greedy, pbqp_solve_branch_and_bound,
+          pbqp_solve_branch_and_bound_optimized, pbqp_solve_reduction}) {
       pbqp_solution *out = nullptr;
       check(solve(&problem, &out, &error) == PBQP_INVALID && !out);
     }
@@ -580,8 +590,9 @@ void test_direct_api() {
   p.num_edges = 2;
   invalid(p);
   p.num_edges = 1;
-  for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_greedy,
-                     pbqp_solve_branch_and_bound, pbqp_solve_reduction})
+  for (auto solve :
+       {pbqp_solve_bruteforce, pbqp_solve_greedy, pbqp_solve_branch_and_bound,
+        pbqp_solve_branch_and_bound_optimized, pbqp_solve_reduction})
     check(solve(&p, nullptr, nullptr) == PBQP_INVALID);
   check(pbqp_read("unused", nullptr, nullptr) == PBQP_INVALID);
   pbqp_problem empty{0, 0, nodes, edges};
@@ -802,8 +813,8 @@ void test_reduction() {
   check(pbqp_solve_bruteforce(trap.get(), &answer, nullptr) == PBQP_OK);
   pbqp_solution_free(answer);
 
-  check(pbqp_read("examples/06_too_long_for_any_exact.pbqp", &raw, nullptr) ==
-        PBQP_OK);
+  check(pbqp_read("examples/07_parallel_exact_beats_heuristics.pbqp", &raw,
+                  nullptr) == PBQP_OK);
   std::unique_ptr<pbqp_problem, decltype(free_problem)> large(raw,
                                                               free_problem);
   pbqp_cost_t greedy_cost = 0;
@@ -811,7 +822,7 @@ void test_reduction() {
     check(solve(large.get(), &answer, nullptr) == PBQP_OK);
     std::unique_ptr<pbqp_solution, decltype(free_solution)> solution(
         answer, free_solution);
-    check(solution->num_nodes == 20 &&
+    check(solution->num_nodes == 32 &&
           solution->quality == PBQP_SOLUTION_FEASIBLE);
     pbqp_evaluation evaluation{};
     check(pbqp_evaluate_assignment(large.get(), solution->options,
@@ -852,7 +863,7 @@ void test_branch_and_bound_seed() {
     } else {
       check(!greedy);
     }
-    // Both exact solvers must match the independent optimum cost.
+    // All exact solvers must match the independent optimum cost.
     check_reference(*problem);
     pbqp_error error{42, "old greedy diagnostic"};
     check(pbqp_solve_branch_and_bound(problem.get(), &raw_solution, &error) ==
@@ -1032,7 +1043,8 @@ void test_progress() {
       if (forbidden && !costs.empty())
         std::fill(costs.back().begin(), costs.back().end(), PBQP_INF);
       for (auto solve : {pbqp_solve_bruteforce_with_progress,
-                         pbqp_solve_branch_and_bound_with_progress}) {
+                         pbqp_solve_branch_and_bound_with_progress,
+                         pbqp_solve_branch_and_bound_optimized_with_progress}) {
         ProgressLog log;
         pbqp_solution *progress = nullptr, *plain = nullptr;
         auto status = solve(&p, collect_progress, &log, &progress, nullptr);
@@ -1056,7 +1068,8 @@ void test_progress() {
     }
   }
   for (auto solve : {pbqp_solve_bruteforce_with_progress,
-                     pbqp_solve_branch_and_bound_with_progress}) {
+                     pbqp_solve_branch_and_bound_with_progress,
+                     pbqp_solve_branch_and_bound_optimized_with_progress}) {
     ProgressLog log;
     pbqp_solution *solution = nullptr;
     check(solve(nullptr, collect_progress, &log, &solution, nullptr) ==

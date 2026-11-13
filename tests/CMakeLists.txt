@@ -7,7 +7,7 @@ set(PBQP_PARALLEL_TEST_SOURCES test_parallel_exact.cpp)
 set(PBQP_REDUCTION_TEST_SOURCES test_reduction.cpp)
 set(PBQP_C_API_TEST_SOURCES test_c_api.c)
 set(PBQP_INTERNAL_TEST_SOURCES test_search_internals.cpp)
-set(PBQP_INTERNAL_TEST_SUPPORT search_test_support.cpp)
+set(PBQP_INTERNAL_TEST_SUPPORT search_test_support.cpp bnbopt_test_support.cpp)
 pbqp_register_format_sources(${PBQP_TEST_SOURCES} ${PBQP_REDUCTION_TEST_SOURCES}
   ${PBQP_C_API_TEST_SOURCES} ${PBQP_PARALLEL_TEST_SOURCES}
   ${PBQP_INTERNAL_TEST_SOURCES} ${PBQP_INTERNAL_TEST_SUPPORT})
@@ -53,6 +53,6 @@ add_test(NAME cli COMMAND "${CMAKE_COMMAND}"
   "-DPBQP=$<TARGET_FILE:pbqp_cli>"
   "-DGENERATOR=$<TARGET_FILE:pbqp_generate>"
   "-DEXAMPLE=${PROJECT_SOURCE_DIR}/examples/01_basic.pbqp"
-  "-DHEURISTIC_EXAMPLE=${PROJECT_SOURCE_DIR}/examples/06_too_long_for_any_exact.pbqp"
+  "-DHEURISTIC_EXAMPLE=${PROJECT_SOURCE_DIR}/examples/07_parallel_exact_beats_heuristics.pbqp"
   "-DWORK=${PROJECT_BINARY_DIR}/cli-test"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/cli.cmake")

@@ -97,5 +97,38 @@ int main(void) {
         solution)
       return 1;
   }
+  if (pbqp_solve_branch_and_bound_optimized(&problem, &solution, NULL) !=
+      PBQP_OK)
+    return 1;
+  ok = ok && solution->quality == PBQP_SOLUTION_OPTIMAL && solution->cost == -2;
+  pbqp_solution_free(solution);
+  {
+    progress_log log = {0, 0};
+    pbqp_solve_options options = {4, record_progress, &log};
+    if (pbqp_solve_branch_and_bound_optimized_with_options(
+            &problem, &options, &solution, NULL) != PBQP_OK)
+      return 1;
+    ok = ok && solution->cost == -2 && log.count == 100 && !log.invalid;
+    pbqp_solution_free(solution);
+    log.count = 0;
+    if (pbqp_solve_branch_and_bound_optimized_with_progress(
+            &problem, record_progress, &log, &solution, NULL) != PBQP_OK)
+      return 1;
+    ok = ok && log.count == 100 && !log.invalid;
+    pbqp_solution_free(solution);
+  }
+  {
+    pbqp_cost_t unary[] = {3, 0};
+    pbqp_cost_t pair[] = {0, 0, 0, PBQP_INF};
+    pbqp_node nodes[] = {{2, unary}, {2, unary}, {2, unary}};
+    pbqp_edge edges[] = {{0, 1, pair}, {0, 2, pair}, {1, 2, pair}};
+    pbqp_problem regalloc = {3, 3, nodes, edges};
+    if (pbqp_solve_branch_and_bound_optimized(&regalloc, &solution, NULL) !=
+        PBQP_OK)
+      return 1;
+    ok =
+        ok && solution->quality == PBQP_SOLUTION_OPTIMAL && solution->cost == 6;
+    pbqp_solution_free(solution);
+  }
   return ok ? 0 : 1;
 }

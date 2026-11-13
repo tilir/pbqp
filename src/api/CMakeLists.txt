@@ -7,6 +7,7 @@ set(PBQP_COMPONENT_SOURCES
   io.cpp
   bruteforce.cpp
   branch_and_bound.cpp
+  branch_and_bound_opt.cpp
   greedy.cpp
   reduction.cpp
   solution.cpp

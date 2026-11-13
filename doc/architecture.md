@@ -13,7 +13,8 @@ changing partition names or making private partitions available to clients.
 | `src/io/` | Tokenization, parsing helpers, cost serialization |
 | `src/search/` | Prefix jobs, dispatch, percentage boundaries, covered-space accumulation |
 | `src/solvers/naive/` | Sequential and parallel exhaustive enumeration |
-| `src/solvers/bnb/` | Bounds, incumbent, prefix planning, worker DFS, orchestration |
+| `src/solvers/bnb/` | Baseline bounds and shared exact B&B mechanics |
+| `src/solvers/bnbopt/` | Optimized bounds, verified regalloc structure, clique-first order |
 | `src/solvers/greedy/` | Cost-priority assignment |
 | `src/solvers/reduction/` | Reduction graph, candidate worklist, propagation and reconstruction |
 
@@ -26,9 +27,11 @@ in a GCC module partition.
 `core` and shared `search` must not import concrete solvers. The B&B orchestrator
 may invoke greedy and reduction for incumbent seeds; its bounds and workers do
 not depend on either heuristic. Shared mechanisms include prefix descriptors,
-dispatch, progress, and reference evaluation. Winner selection stays specific to
-the algorithm: naive preserves the first lexicographic minimum, while B&B shares
-an any-optimum incumbent.
+dispatch, progress, and reference evaluation. Baseline and optimized B&B share
+identical worker/control semantics through a bounds-strategy template, with
+original-ID assignments and ordered search positions. Winner selection stays
+specific to the algorithm: naive preserves the first lexicographic minimum,
+while B&B shares an any-optimum incumbent.
 
 Every subsystem lists its exact sources in its local `CMakeLists.txt`, registers
 those same paths for formatting, and propagates the aggregate lists upward.
@@ -37,10 +40,10 @@ set on the `pbqp` target. Modules are compiled once, with no generated mirrors o
 exported implementation helpers. Test and benchmark sources are registered for
 formatting even when those targets are disabled.
 
-`tests/search_test_support.cpp` is a test-only implementation unit of `pbqp`,
-compiled in the owning library target when `BUILD_TESTING` is enabled. It imports
-private partitions and checks preparation invariants, including whether a seed
-was attempted and how many prefix jobs were produced. A namespaced C++ linkage
+`tests/search_test_support.cpp` and `tests/bnbopt_test_support.cpp` are test-only
+implementation units of `pbqp`, compiled in the owning library target when
+`BUILD_TESTING` is enabled. They import private partitions and check preparation
+invariants, prefix jobs, structural eligibility, and numerical lower bounds. A namespaced C++ linkage
 bridge lets the ordinary test executable invoke these checks without exposing
 internal types or extending the C API. Production builds with testing disabled
 do not include the bridge.

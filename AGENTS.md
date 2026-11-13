@@ -102,12 +102,19 @@ library/format aggregates to its parent; module partition names stay unchanged.
   and a final cost/lexicographic reduction without per-tuple shared-best locking.
 - `src/api/branch_and_bound.cpp`: validation and ownership boundary for exact search.
 - `src/solvers/bnb/branch_and_bound.cppm`: coarse prefix queue and per-worker orchestration.
+- `src/solvers/bnbopt/bnbopt_structure.cppm`: verified small-regalloc graph,
+  bounded clique discovery, clique-first order, and ordered domain views.
+- `src/solvers/bnbopt/bnbopt_bounds.cppm`: bit-mask forward checking and
+  reference-order DP for clique spill-count constraints, with generic fallback.
+- `src/api/branch_and_bound_opt.cpp`: optimized solver C validation/ownership
+  boundary and plain/progress/options entry points.
 - `src/solvers/bnb/bnb_bounds.cppm`: immutable minima, option order, checked regalloc symmetry,
   forward checking, and reference-order conditioned bounds. Keep construction
   as named preparation steps and individual bound terms as small helpers.
 - `src/solvers/bnb/bnb_incumbent.cppm`: mutex-protected assignment and atomic cost/feasibility.
 - `src/solvers/bnb/bnb_tasks.cppm`: adaptive viable-prefix frontier and large-domain batches.
-- `src/solvers/bnb/bnb_worker.cppm`: private assignment/cursors/scratch/local best and iterative
+- `src/solvers/bnb/bnb_worker.cppm`: bounds-strategy worker with original-ID assignments, search-position cursors,
+  private scratch/local best, and iterative
   allocation-free DFS within one prefix subtree.
 - `src/search/search_progress.cppm`: shared serialized mixed-radix covered-space counts.
 - `src/search/search_tasks.cppm`: shared prefix descriptors/planning and atomic tickets.
@@ -141,8 +148,8 @@ library/format aggregates to its parent; module partition names stay unchanged.
   diagnostics, quality, and comparison with independent recursive search.
 - `tests/test_parallel_exact.cpp`: multiworker costs/naive ties, serialized progress,
   mixed domains, huge counts, no-seed cases, and independent solution ownership.
-- `tests/test_search_internals.cpp`, `tests/search_test_support.cpp`: private
-  preparation regressions through a test-only C++ linkage bridge. Compile the
+- `tests/test_search_internals.cpp`, `tests/search_test_support.cpp`,
+  `tests/bnbopt_test_support.cpp`: private preparation/bound regressions through a test-only C++ linkage bridge. Compile the
   support implementation unit in `pbqp` so partitions stay PRIVATE and are not
   recompiled or exported for tests. Omit this bridge with `BUILD_TESTING=OFF`.
 - `tests/test_reduction.cpp`: randomized low-degree differential tests, RN
@@ -247,7 +254,7 @@ terminates with NO_SOLUTION. On `02_greedy_exact.pbqp`, greedy must color nodes 
 before spilling node 4, for total cost 40; its result quality remains FEASIBLE.
 
 Branch-and-bound returns any reference-order optimum; ties can depend on
-scheduling. Naive alone preserves the first lexicographic minimum. B&B assigns
+scheduling. Naive alone preserves the first lexicographic minimum. Baseline `bnb` assigns
 nodes in ID order and visits options by unary cost, then ID. Shared immutable
 bounds include unary, row, and matrix minima; each worker owns its assignment,
 DFS cursors, allowed-option scratch, and local best solution. Forward checking
@@ -294,6 +301,40 @@ assignment, including feasible +/-INF costs. This preserves naive's first-minimu
 contract. Keep the single-thread naive path direct and its no-progress observer
 compiled away. The new entry point is `pbqp_solve_bruteforce_with_options`.
 
+`bnbopt` uses the shared B&B DFS/planner/orchestrator with an optimized bounds
+strategy; keep naive's distinct first-minimum control flow separate. Original
+assignments are indexed by node ID; prefix ranks and cursors are indexed by
+search position. Each bounds strategy supplies original input, ordered domain
+view, node mapping, workspace, preparation, and lower-bound calculation.
+Allocate progress only after the order is prepared, using that domain view.
+TBB dispatch borrows a callable context synchronously, with no owning type erasure.
+
+The optimized path is restricted to verified uniform regalloc graphs with up to
+64 nodes and registers. Otherwise preserve ordinary bounds and ID order. Build
+cliques only after the cheap root/seed checks. Bound clique refinement to
+100,000 extensions and keep at most 32 valid clique witnesses; never require
+an unbounded maximum-clique preprocessing search. The order anchors a large
+clique first, then favors neighbors of the chosen prefix, degree, spill cost,
+and ID. Canonical register naming follows this search order.
+
+For each clique's unassigned nodes, the union of allowed register masks bounds
+how many can avoid spilling. Enforce its necessary spill count with a DP that
+adds *every original unary term in ID order*. Use finite spill/zero-register
+transitions, capped spill counts, and a separate reachability flag per state.
+Monotone rounded addition justifies retaining the cheapest prefix state even
+with overflow and negative spill costs. Combine clique bounds by maximum; do
+not sum overlapping costs or replace the DP with a real-sum cheapest-spill bound.
+All feasible matrices in the verified shape contribute zero. Use the original
+shared evaluator for reported costs. Double-valued clique ranking is a heuristic
+for preparation only and must never supply a pruning bound.
+
+Private tests enumerate every canonical prefix and all original-order completions
+on small regalloc graphs with signed, INF, fractional, cancellation, subnormal,
+and extreme costs. Check lower bounds and infeasibility against the independent
+evaluator, validate every stored clique, and cover 63/64/65 node/register limits.
+Keep these tests independent of the DP, and retain failing input dumps. Extend
+public oracle, parallel callback, ownership, C ABI, and CLI cases for `bnbopt`.
+
 The reduction heuristic clones the problem and prefers R0/R1/R2 by node ID.
 R1 adds a minimized leaf contribution to its neighbor; R2 adds minimized
 contributions to a neighbor edge, allocating fill if needed. RN disconnects
@@ -333,17 +374,18 @@ installed oneTBB via `find_package(TBB CONFIG REQUIRED COMPONENTS tbb)` and
 `TBB::tbb`; development systems and CI need `libtbb-dev`.
 
 Invoke the solver as `pbqp --solve=naive INPUT`. `pbqp --help` lists available
-solvers: `naive` selects exhaustive search, `bnb` exact branch-and-bound,
+solvers: `naive` selects exhaustive search, `bnb` baseline exact branch-and-bound,
+`bnbopt` optimized exact search,
 `greedy` cost-priority assignment, and `r1r2rn` reduction/backpropagation. Do not
 reintroduce `solve` or `dump` positional subcommands. Problem dumping remains
 available to library users through `pbqp_write`.
-`--numthreads=N` is a positive, int-representable naive/B&B concurrency limit,
+`--numthreads=N` is a positive, int-representable naive/B&B/bnbopt concurrency limit,
 accepting either named-option spelling; default 1. The C options entry point is
 `pbqp_solve_branch_and_bound_with_options`; NULL options select one thread and
-no callback, and zero threads is invalid. Both options-based exact solvers use
+no callback, and zero threads is invalid. All options-based exact solvers use
 `pbqp_solve_options`. Legacy exact entry points use one thread.
 
-`--heartbeat` is a valueless flag for `naive` and `bnb`. It writes one flushed dot to
+`--heartbeat` is a valueless flag for `naive`, `bnb`, and `bnbopt`. It writes one flushed dot to
 stderr for each completed integer percentage, from 1 through 100, followed by
 a newline at completion. Count all tuples, including forbidden assignments.
 The first dot is emitted after ceil(total / 100) visited tuples; no zero-percent
@@ -456,7 +498,7 @@ cleanup tests, I/O failures (including `/dev/full` when available), greedy
 traps, and sparse graph generation without quadratic pair scans. Reduction
 coverage includes R1 orientations, heterogeneous domains, R2 fill and existing
 edges, RN dead ends, overflow feasibility, and input/solution ownership.
-`06_too_long_for_any_exact.pbqp` runs only through greedy and r1r2rn in tests;
+`07_parallel_exact_beats_heuristics.pbqp` runs only through greedy and r1r2rn in tests;
 validate both assignments and reference-order costs without exact search.
 Randomized trees, forests, and cycles use quarter-step costs small enough that
 all intermediate sums are exact. Compare feasibility and optimum cost with
@@ -504,11 +546,14 @@ second, and an empirical complexity fit. Consult the
 [Google Benchmark user guide](https://google.github.io/benchmark/user_guide.html)
 for the framework's command-line options.
 
-`pbqp_benchmark_bnb` loads examples 07 and 08 from the checkout root. Example 07
-compares 1/2/4/8 requested threads; example 08 compares 1/4/16 with heartbeat
+`pbqp_benchmark_bnb` loads examples 06 and 07 from the checkout root. Example 06
+compares 1/2/4/8 requested threads; example 07 compares 1/4/16 with heartbeat
 enabled and disabled, covering progress contention. Both use `UseRealTime`, so
 worker CPU time is not mistaken for elapsed solve time. Parsing and an optimum
-and assignment check are untimed. The benchmark heartbeat uses a no-op callback
+and assignment check are untimed. Optimized cases `BranchAndBoundOpt/Example06`, `/Example07`, and `/Example08`
+compare baseline/optimized behavior on the original, unpermuted fixtures.
+Example 08's known optimum is 161.241684; it is a benchmark, not a full baseline
+exact-search CTest. The benchmark heartbeat uses a no-op callback
 to measure progress accounting without terminal I/O. Run:
 
 ```sh
@@ -536,7 +581,7 @@ cmake --build build-clang-modules --target pbqp_benchmark_root_bounds
 ./build-clang-modules/pbqp_benchmark_root_bounds --benchmark_repetitions=3
 ```
 
-Do not add a full example-07 solve to ordinary CTest. The optimum is zero;
+Do not add a full example-06 solve to ordinary CTest. The optimum is zero;
 all terms are nonnegative and the returned zero-cost coloring is feasible.
 
 Graph construction and a preflight assignment check run outside the measured

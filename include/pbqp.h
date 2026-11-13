@@ -284,6 +284,30 @@ pbqp_status pbqp_solve_branch_and_bound_with_options(
     const pbqp_problem *problem, const pbqp_solve_options *options,
     pbqp_solution **out, pbqp_error *error);
 
+/* Optimized exact B&B with the same validation, ownership, result quality,
+ * reference-order evaluation, and diagnostic contracts as ordinary B&B.
+ * Verified small uniform regalloc inputs use structural clique-first traversal,
+ * bit-mask forward checking, and clique spill-count bounds. Other inputs use
+ * the ordinary bounds. Traversal order never changes summation order. Returns
+ * any optimum; tied assignments may depend on scheduling. This entry point
+ * uses one thread. No external mathematical-programming library is required. */
+pbqp_status pbqp_solve_branch_and_bound_optimized(const pbqp_problem *problem,
+                                                  pbqp_solution **out,
+                                                  pbqp_error *error);
+
+/* Optional serialized covered-space progress, with the same synchronous
+ * callback and exact-percentage contracts as ordinary B&B. Uses one thread. */
+pbqp_status pbqp_solve_branch_and_bound_optimized_with_progress(
+    const pbqp_problem *problem, pbqp_progress_callback progress,
+    void *user_data, pbqp_solution **out, pbqp_error *error);
+
+/* Options-based optimized B&B. NULL selects one thread and no callback.
+ * Supports the same thread limit and callback contracts as ordinary B&B.
+ * All work, including callbacks, completes before this call returns. */
+pbqp_status pbqp_solve_branch_and_bound_optimized_with_options(
+    const pbqp_problem *problem, const pbqp_solve_options *options,
+    pbqp_solution **out, pbqp_error *error);
+
 /* Validates and borrows inputs with the same ownership rules as brute force.
  * Visits nodes by descending (maximum - minimum) finite unary cost, breaking
  * ties by node ID. In regalloc problems this prioritizes expensive spills.

@@ -12,11 +12,13 @@
 
 namespace pbqp {
 void run_search_internal_tests();
-}
+void run_bnbopt_internal_tests();
+} // namespace pbqp
 
 int main() {
   try {
     pbqp::run_search_internal_tests();
+    pbqp::run_bnbopt_internal_tests();
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return 1;

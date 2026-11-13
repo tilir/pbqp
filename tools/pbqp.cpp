@@ -29,13 +29,14 @@ void help() {
       << "Usage: pbqp --solve=SOLVER [--heartbeat] [--numthreads=N] INPUT\n"
          "       pbqp --help\n\n"
          "  --heartbeat  Print one dot per completed percent to stderr (naive "
-         "or bnb).\n\n"
+         "or either bnb solver).\n\n"
          "  --numthreads=N  Exact-solver concurrency, positive integer "
          "(default 1).\n\n"
          "Solvers:\n"
          "  naive   Exhaustive search; proves optimality or infeasibility.\n"
          "  bnb     Exact branch-and-bound; prunes bounded or forbidden "
          "subtrees.\n"
+         "  bnbopt  Exact B&B with structural order and clique bounds.\n"
          "  r1r2rn  R1/R2/RN reduction and backpropagation heuristic.\n"
          "  greedy  Cost-priority heuristic; returns a feasible, possibly "
          "suboptimal solution.\n";
@@ -63,20 +64,21 @@ std::optional<SolverOptions> parse_options(int argc, char **argv) {
       return SolverOptions{.help_requested = true};
     auto solver = arguments.require("--solve");
     if (solver != "naive" && solver != "greedy" && solver != "bnb" &&
-        solver != "r1r2rn")
+        solver != "bnbopt" && solver != "r1r2rn")
       throw std::invalid_argument("unknown solver: " + std::string(solver));
     bool report_progress = arguments.has("--heartbeat");
-    if (report_progress && solver != "naive" && solver != "bnb")
-      throw std::invalid_argument(
-          "--heartbeat is supported only by the naive and bnb solvers");
+    if (report_progress && solver != "naive" && solver != "bnb" &&
+        solver != "bnbopt")
+      throw std::invalid_argument("--heartbeat is supported only by the naive, "
+                                  "bnb, and bnbopt solvers");
     if (arguments.positional().size() != 1)
       throw std::invalid_argument("expected exactly one input file");
 
     size_t num_threads = 1;
     if (arguments.has("--numthreads")) {
-      if (solver != "bnb" && solver != "naive")
-        throw std::invalid_argument(
-            "--numthreads is supported only by the naive and bnb solvers");
+      if (solver != "bnb" && solver != "bnbopt" && solver != "naive")
+        throw std::invalid_argument("--numthreads is supported only by the "
+                                    "naive, bnb, and bnbopt solvers");
       auto value = arguments.require("--numthreads");
       auto parsed = std::from_chars(value.data(), value.data() + value.size(),
                                     num_threads);
@@ -120,12 +122,14 @@ pbqp_status solve_problem(const SolverOptions &options,
     status = pbqp_solve_greedy(&problem, &raw, &error);
   } else if (options.solver == "r1r2rn") {
     status = pbqp_solve_reduction(&problem, &raw, &error);
-  } else if (options.solver == "bnb") {
+  } else if (options.solver == "bnb" || options.solver == "bnbopt") {
     const pbqp_solve_options config{
         options.num_threads, options.report_progress ? heartbeat : nullptr,
         nullptr};
-    status = pbqp_solve_branch_and_bound_with_options(&problem, &config, &raw,
-                                                      &error);
+    auto solve = options.solver == "bnbopt"
+                     ? pbqp_solve_branch_and_bound_optimized_with_options
+                     : pbqp_solve_branch_and_bound_with_options;
+    status = solve(&problem, &config, &raw, &error);
   } else {
     const pbqp_solve_options config{
         options.num_threads, options.report_progress ? heartbeat : nullptr,

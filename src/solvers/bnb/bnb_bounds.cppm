@@ -65,6 +65,10 @@ private:
 public:
   explicit BranchAndBoundBounds(const pbqp_problem &p);
   const pbqp_problem &input() const noexcept { return problem; }
+  const pbqp_problem &domains() const noexcept { return problem; }
+  size_t node(size_t step) const noexcept { return step; }
+  bool register_symmetric() const noexcept { return symmetric_registers; }
+  void prepare_search() noexcept {}
   size_t num_options() const noexcept { return offsets.back(); }
   size_t option(size_t node, size_t rank) const noexcept {
     return option_order[offsets[node] + rank];

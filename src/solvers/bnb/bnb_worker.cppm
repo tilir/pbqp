@@ -3,6 +3,7 @@
  *
  * All assignments, option cursors, conditioned-bound scratch, and local best
  * storage belong to this worker. Shared input and minima are read-only.
+ * Assignments use original node IDs; cursors and prefixes use search positions.
  * No allocation or exception handling occurs inside subtree search.
  *
  * SPDX-License-Identifier: GPL-3.0-only
@@ -15,26 +16,26 @@ module;
 #include <vector>
 
 module pbqp:bnb_worker;
-import :bnb_bounds;
 import :bnb_incumbent;
 import :search_tasks;
 import :ownership;
 
 namespace pbqp {
-class BranchAndBoundWorker {
-  const BranchAndBoundBounds &bounds;
+template <class Bounds> class BranchAndBoundWorker {
+  const Bounds &bounds;
   BranchAndBoundIncumbent &incumbent;
   std::vector<size_t> tuple;
   std::vector<size_t> cursor;
-  BranchAndBoundBounds::Workspace workspace;
+  typename Bounds::Workspace workspace;
   SolutionPtr best;
   bool found = false;
 
   bool advance(size_t &depth, size_t root) noexcept {
     while (depth > root) {
-      size_t node = depth - 1;
-      if (++cursor[node] < bounds.input().nodes[node].num_options) {
-        tuple[node] = bounds.option(node, cursor[node]);
+      size_t step = depth - 1;
+      size_t node = bounds.node(step);
+      if (++cursor[step] < bounds.domains().nodes[step].num_options) {
+        tuple[node] = bounds.option(node, cursor[step]);
         return true;
       }
       --depth;
@@ -52,8 +53,7 @@ class BranchAndBoundWorker {
   }
 
 public:
-  BranchAndBoundWorker(const BranchAndBoundBounds &b,
-                       BranchAndBoundIncumbent &i)
+  BranchAndBoundWorker(const Bounds &b, BranchAndBoundIncumbent &i)
       : bounds(b), incumbent(i), tuple(b.input().num_nodes),
         cursor(b.input().num_nodes), workspace(b),
         best(make_solution(b.input().num_nodes)) {}
@@ -67,7 +67,8 @@ public:
           incumbent.can_improve(bound)) {
         if (depth < tuple.size()) {
           cursor[depth] = 0;
-          tuple[depth] = bounds.option(depth, 0);
+          size_t node = bounds.node(depth);
+          tuple[node] = bounds.option(node, 0);
           ++depth;
           continue;
         }
@@ -83,7 +84,8 @@ public:
     size_t root = task.ranks.size();
     for (size_t id = 0; id < root; ++id) {
       cursor[id] = task.ranks[id];
-      tuple[id] = bounds.option(id, cursor[id]);
+      size_t node = bounds.node(id);
+      tuple[node] = bounds.option(node, cursor[id]);
     }
     if (task.child_begin == task.child_end) {
       search_prefix(root, observe);
@@ -91,7 +93,8 @@ public:
     }
     for (size_t rank = task.child_begin; rank < task.child_end; ++rank) {
       cursor[root] = rank;
-      tuple[root] = bounds.option(root, rank);
+      size_t node = bounds.node(root);
+      tuple[node] = bounds.option(node, rank);
       search_prefix(root + 1, observe);
     }
   }

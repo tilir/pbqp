@@ -49,15 +49,18 @@ void report(unsigned percent, void *data) noexcept {
   log.active = false;
 }
 
-void verify(const pbqp_problem &problem, size_t threads, bool naive = false) {
+void verify(const pbqp_problem &problem, size_t threads, bool naive = false,
+            bool optimized = false) {
   pbqp_solution *raw = nullptr;
   auto expected = pbqp_solve_bruteforce(&problem, &raw, nullptr);
   SolutionPtr exact(raw);
   Progress progress;
   const pbqp_solve_options options{threads, report, &progress};
   pbqp_error error{42, "old error"};
-  auto solve = naive ? pbqp_solve_bruteforce_with_options
-                     : pbqp_solve_branch_and_bound_with_options;
+  auto solve =
+      naive ? pbqp_solve_bruteforce_with_options
+            : (optimized ? pbqp_solve_branch_and_bound_optimized_with_options
+                         : pbqp_solve_branch_and_bound_with_options);
   auto status = solve(&problem, &options, &raw, &error);
   SolutionPtr solution(raw);
   check(status == expected && !progress.invalid && progress.count == 100);
@@ -90,6 +93,7 @@ void test_small() {
     auto problem = owner.view();
     for (size_t threads : {size_t{1}, size_t{2}, size_t{4}, size_t{8}}) {
       verify(problem, threads);
+      verify(problem, threads, false, true);
       verify(problem, threads, true);
     }
   }
@@ -232,11 +236,92 @@ void test_singleton_prefix() {
   verify(problem, 4);
 }
 
+void test_optimized_regalloc() {
+  for (unsigned seed = 0; seed < 60; ++seed) {
+    size_t count = seed % 8;
+    size_t pairs = count ? count * (count - 1) / 2 : 0;
+    pbqp_tools::GeneratorOptions options{count, seed % (pairs + 1), 0, seed};
+    options.family = pbqp_tools::GeneratorFamily::RegAlloc;
+    options.num_registers = 1 + seed % 3;
+    options.spill_cost_min = 0.125f;
+    options.spill_cost_max = 17.375f;
+    auto owner = pbqp_tools::generate_problem(options);
+    auto problem = owner.view();
+    context = "bnbopt regalloc seed=" + std::to_string(seed);
+    for (size_t threads : {size_t{1}, size_t{4}, size_t{8}})
+      verify(problem, threads, false, true);
+  }
+  // Independent triangles require four spills. A single clique relaxation
+  // cannot account for every component, leaving actual subtree work to do.
+  pbqp_cost_t unary[] = {1, 0, 0};
+  pbqp_cost_t matrix[] = {0, 0, 0, 0, PBQP_INF, 0, 0, 0, PBQP_INF};
+  std::vector<pbqp_node> nodes(12, pbqp_node{3, unary});
+  std::vector<pbqp_edge> edges;
+  for (size_t base = 0; base < 12; base += 3)
+    for (size_t src = base; src < base + 3; ++src)
+      for (size_t tgt = src + 1; tgt < base + 3; ++tgt)
+        edges.push_back({src, tgt, matrix});
+  pbqp_problem problem{nodes.size(), edges.size(), nodes.data(), edges.data()};
+  verify(problem, 4, false, true);
+
+  const auto maximum = std::numeric_limits<pbqp_cost_t>::max();
+  pbqp_cost_t positive[] = {maximum, 0};
+  pbqp_cost_t negative[] = {-maximum, 0};
+  pbqp_cost_t forbidden[] = {PBQP_INF, 0}, ordinary[] = {1, 0};
+  pbqp_node triangle[] = {{2, positive}, {2, positive}, {2, positive}};
+  pbqp_cost_t pair[] = {0, 0, 0, PBQP_INF};
+  pbqp_edge triangle_edges[] = {{0, 1, pair}, {0, 2, pair}, {1, 2, pair}};
+  pbqp_problem numeric{3, 3, triangle, triangle_edges};
+  // The clique requires two spills. +INF is a reachable optimum, rather than
+  // an unreachable DP state or a proof of infeasibility.
+  verify(numeric, 4, false, true);
+  triangle[2].costs = negative;
+  verify(numeric, 4, false, true);
+  triangle[0].costs = triangle[1].costs = forbidden;
+  triangle[2].costs = ordinary;
+  verify(numeric, 4, false, true);
+
+  pbqp_cost_t hard[] = {PBQP_INF, 0, 0};
+  pbqp_node hard_nodes[] = {{3, hard}, {3, hard}, {3, hard}};
+  pbqp_edge hard_edges[] = {{0, 1, matrix}, {0, 2, matrix}, {1, 2, matrix}};
+  pbqp_problem impossible{3, 3, hard_nodes, hard_edges};
+  // Every pair can use different registers, but three mutually interfering
+  // nodes cannot fit in two registers when no spill is allowed.
+  verify(impossible, 4, false, true);
+
+  // Four odd cycles need at least one spill each with two registers. Cliques
+  // have size two, so this keeps the root bound loose and exercises workers
+  // without an expensive exhaustive oracle or a wall-clock assertion.
+  std::vector<pbqp_node> cycles(20, pbqp_node{3, unary});
+  std::vector<pbqp_edge> cycle_edges;
+  for (size_t base = 0; base < cycles.size(); base += 5) {
+    for (size_t id = base; id < base + 4; ++id)
+      cycle_edges.push_back({id, id + 1, matrix});
+    cycle_edges.push_back({base, base + 4, matrix});
+  }
+  pbqp_problem odd_cycles{cycles.size(), cycle_edges.size(), cycles.data(),
+                          cycle_edges.data()};
+  Progress progress;
+  pbqp_solve_options configuration{4, report, &progress};
+  pbqp_solution *raw = nullptr;
+  check(pbqp_solve_branch_and_bound_optimized_with_options(
+            &odd_cycles, &configuration, &raw, nullptr) == PBQP_OK);
+  SolutionPtr solution(raw);
+  check(solution->quality == PBQP_SOLUTION_OPTIMAL && solution->cost == 4);
+  pbqp_evaluation evaluation{};
+  check(pbqp_evaluate_assignment(&odd_cycles, solution->options,
+                                 solution->num_nodes, &evaluation,
+                                 nullptr) == PBQP_OK);
+  check(evaluation.is_feasible && evaluation.cost == 4);
+  check(progress.count == 100 && !progress.invalid);
+}
+
 void test_contract() {
   pbqp_problem empty{};
   pbqp_solution *raw = nullptr;
   const pbqp_solve_options options{4, nullptr, nullptr};
   for (auto solve : {pbqp_solve_branch_and_bound_with_options,
+                     pbqp_solve_branch_and_bound_optimized_with_options,
                      pbqp_solve_bruteforce_with_options}) {
     check(solve(&empty, nullptr, &raw, nullptr) == PBQP_OK);
     SolutionPtr solution(raw);
@@ -279,6 +364,7 @@ int main() {
     test_progress_batches();
     test_singleton_prefix();
     test_contract();
+    test_optimized_regalloc();
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return 1;

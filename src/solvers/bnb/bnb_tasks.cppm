@@ -14,31 +14,33 @@ module;
 #include <vector>
 
 module pbqp:bnb_tasks;
-import :bnb_bounds;
 import :bnb_incumbent;
 import :search_tasks;
 
 namespace pbqp {
-class PrefixPlanner {
-  const BranchAndBoundBounds &bounds;
+template <class Bounds> class PrefixPlanner {
+  const Bounds &bounds;
   BranchAndBoundIncumbent &incumbent;
-  BranchAndBoundBounds::Workspace workspace;
+  typename Bounds::Workspace workspace;
   std::vector<size_t> tuple;
 
   bool retain(const PrefixTask &task);
 
 public:
-  PrefixPlanner(const BranchAndBoundBounds &b, BranchAndBoundIncumbent &i)
+  PrefixPlanner(const Bounds &b, BranchAndBoundIncumbent &i)
       : bounds(b), incumbent(i), workspace(b), tuple(b.input().num_nodes) {}
   PrefixPlan build(size_t threads) {
-    return plan_prefixes(bounds.input(), threads,
+    return plan_prefixes(bounds.domains(), threads,
                          [&](const PrefixTask &task) { return retain(task); });
   }
 };
 
-bool PrefixPlanner::retain(const PrefixTask &task) {
-  for (size_t id = 0; id < task.ranks.size(); ++id)
-    tuple[id] = bounds.option(id, task.ranks[id]);
+template <class Bounds>
+bool PrefixPlanner<Bounds>::retain(const PrefixTask &task) {
+  for (size_t step = 0; step < task.ranks.size(); ++step) {
+    size_t node = bounds.node(step);
+    tuple[node] = bounds.option(node, task.ranks[step]);
+  }
   pbqp_cost_t cost;
   if (!bounds.lower_bound(tuple.data(), task.ranks.size(), workspace, cost) ||
       !incumbent.can_improve(cost))

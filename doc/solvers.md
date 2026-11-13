@@ -27,13 +27,13 @@ all visited tuples using the same exact covered-space accumulator as B&B.
 
 ```sh
 pbqp --solve=bnb --numthreads=4 --heartbeat \
-  examples/07_exact_beats_heuristics.pbqp
+  examples/06_exact_beats_heuristics.pbqp
 ```
 
 `bnb` is exact under the reference float semantics. It returns any optimum;
 the winning assignment on a tie can depend on scheduling. `naive` retains its
 lexicographic tie rule. `--numthreads=N` is positive, defaults to 1, and is
-accepted by both exact solvers. It limits oneTBB arena concurrency, including the caller;
+accepted by all three exact solvers. It limits oneTBB arena concurrency, including the caller;
 workload size and available TBB resources may reduce actual concurrency.
 
 Preparation checks the root bound first. A root infeasibility proof skips both
@@ -98,7 +98,7 @@ returns OPTIMAL; exhausting the remaining space without a feasible incumbent
 proves INFEASIBLE. Worst-case search remains exponential, and OPTIMAL refers
 to sequential float evaluation rather than an exact real sum.
 
-Example 07 has a feasible zero-cost assignment and nonnegative input terms, so
+Example 06 has a feasible zero-cost assignment and nonnegative input terms, so
 its optimum is zero. It is available as an optional Google Benchmark case for
 1/2/4/8 threads, rather than an exhaustive routine CTest workload. Timing includes
 prefix planning and the resulting search; changes in planning and incumbent
@@ -112,14 +112,85 @@ per worker, together with separate preparation, seeding, planning, and search
 times. Wall-time speedup alone cannot distinguish parallel execution from a
 better order of incumbent discoveries.
 
-Both examples show the benefit of exact search over the heuristics. Example 08
+Both examples show the benefit of exact search over the heuristics. Example 07
 also has enough search work to demonstrate parallel speedup; its benchmark
 compares 1/4/16 threads with heartbeat enabled and disabled.
 
 | Example | Greedy | R1/R2/RN | Exact optimum |
 | --- | ---: | ---: | ---: |
-| [07_exact_beats_heuristics.pbqp](../examples/07_exact_beats_heuristics.pbqp) | 22.1286182 | 22.1286182 | 0 |
-| [08_parallel_exact_beats_heuristics.pbqp](../examples/08_parallel_exact_beats_heuristics.pbqp) | 91.4585114 | 54.0987892 | 10.1112299 |
+| [06_exact_beats_heuristics.pbqp](../examples/06_exact_beats_heuristics.pbqp) | 22.1286182 | 22.1286182 | 0 |
+| [07_parallel_exact_beats_heuristics.pbqp](../examples/07_parallel_exact_beats_heuristics.pbqp) | 91.4585114 | 54.0987892 | 10.1112299 |
+
+## Optimized branch-and-bound
+
+```sh
+pbqp --solve=bnbopt --numthreads=4 --heartbeat \
+  examples/08_too_long_for_simple_bnb.pbqp
+```
+
+`bnbopt` is a separate exact solver with the same C contracts, any-optimum tie
+policy, thread limit, and covered-space heartbeat as `bnb`. The baseline retains
+its original ID order and independent-term bounds for comparison. Both strategies
+share the worker DFS, incumbent, prefix planner, TBB dispatcher, and progress
+mechanisms through one bounds-strategy template; naive's different winner
+semantics remain separate.
+
+The optimized path requires actual verification of the uniform regalloc shape:
+all nodes have the same domain, every register unary is zero, spill rows and
+columns are zero, register diagonals are INF, and other pairs are zero. Spill
+costs may be negative or INF. The initial representation supports up to 64 nodes
+and 64 registers; all other PBQP inputs use ordinary B&B bounds and ID order.
+No generator metadata is trusted, and no external MILP library is used.
+
+Preparation occurs after cheap root proofs and heuristic seeding. It constructs
+an interference graph, collects greedy cliques, and spends at most 100,000
+extensions refining a large clique with iterative search. Up to 32 valid cliques
+are retained. Finding a maximum is not required for correctness: stopping early
+can only weaken the bound. The selected clique goes first in the fixed search
+order; remaining nodes prefer connections to the chosen prefix, degree, spill
+cost, then ID. Register names are canonicalized by first appearance in this
+search order. Bit masks check conflicts and allowed registers against assigned
+neighbors in either edge orientation.
+
+Assignments remain indexed by original node ID. Prefix ranks and DFS cursors
+are indexed by search position. Separate ordered domain views provide the radix
+sizes for prefix jobs and progress; they never replace the original evaluator's
+node and edge order.
+
+### Clique spill-count bounds
+
+For a clique, let `U` be its unassigned nodes and `A_v` the allowed registers of
+node `v` after forward checking. At most `|union A_v|` nodes of `U` can stay in
+registers, so at least
+
+```text
+q = max(0, |U| - |union A_v|)
+```
+
+must spill. An unavailable spill remains forbidden. A clique whose remaining
+nodes cannot provide `q` allowed spills proves that prefix infeasible.
+
+The numerical bound is a DP over the number of spills in `U`, capped at `q`.
+It processes *all original nodes in ID order*. Outside `U`, it adds the fixed
+or independent minimum unary term. Inside `U`, it can add register cost zero
+when a register is allowed, or the finite spill cost while increasing the
+spill count. Each transition uses `pbqp_cost_add`; the cheapest rounded prefix
+score is kept for each state. Reachability is stored separately, because a
+reachable score may overflow to positive or negative infinity.
+
+Every feasible completion induces a DP path with at least `q` spills. Independent
+outside terms bound its unary terms, and rounded addition is monotone, so the
+DP is a valid reference-order lower bound. Keeping the cheapest prefix per state
+is valid for the same reason. All feasible edge terms in this verified shape
+are zero. Bounds from different cliques are combined by maximum, never by adding
+overlapping costs. There is no regrouped real-sum or double-precision pruning
+estimate. The final solution still uses the shared original-order evaluator.
+
+The C entry points are `pbqp_solve_branch_and_bound_optimized`, its
+`_with_progress` variant, and `_with_options` accepting `pbqp_solve_options`.
+Optional `BranchAndBoundOpt/Example06`, `/Example07`, and `/Example08` Google
+Benchmark cases compare thread counts and heartbeat overhead. The numerical
+and structural study of example 08 is in [example08.md](example08.md).
 
 ## Greedy heuristic
 
@@ -131,8 +202,8 @@ result is FEASIBLE; a dead end is NO_SOLUTION, not proof of INFEASIBLE.
 ## R1/R2/RN reduction heuristic
 
 ```sh
-pbqp --solve=greedy examples/06_too_long_for_any_exact.pbqp
-pbqp --solve=r1r2rn examples/06_too_long_for_any_exact.pbqp
+pbqp --solve=greedy examples/07_parallel_exact_beats_heuristics.pbqp
+pbqp --solve=r1r2rn examples/07_parallel_exact_beats_heuristics.pbqp
 ```
 
 `--solve=r1r2rn` implements the reduction/backpropagation scheme used by LLVM
@@ -193,7 +264,7 @@ prevent a feasible assignment from being reconstructed. A dead end returns
 NO_SOLUTION, never INFEASIBLE. The final assignment is checked against the
 original problem and its cost is recomputed by the shared reference evaluator.
 
-Example 06 runs through both heuristics in CTest, without starting exact
+Example 07 runs through both heuristics in CTest, without starting exact
 search. Neither heuristic is guaranteed to dominate the other on all inputs.
 
 ## Heartbeat
