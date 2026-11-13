@@ -222,6 +222,16 @@ void test_progress_batches() {
   verify(problem, 4, true);
 }
 
+void test_singleton_prefix() {
+  context = "long singleton prefix followed by a binary suffix";
+  pbqp_cost_t costs[] = {1, 0};
+  std::vector<pbqp_node> nodes(1024, pbqp_node{1, costs});
+  nodes.insert(nodes.end(), 8, pbqp_node{2, costs});
+  pbqp_problem problem{nodes.size(), 0, nodes.data(), nullptr};
+  verify(problem, 4, true);
+  verify(problem, 4);
+}
+
 void test_contract() {
   pbqp_problem empty{};
   pbqp_solution *raw = nullptr;
@@ -267,6 +277,7 @@ int main() {
     test_small();
     test_large_progress();
     test_progress_batches();
+    test_singleton_prefix();
     test_contract();
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

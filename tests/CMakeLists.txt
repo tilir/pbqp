@@ -6,8 +6,11 @@ set(PBQP_TEST_SOURCES test_pbqp.cpp)
 set(PBQP_PARALLEL_TEST_SOURCES test_parallel_exact.cpp)
 set(PBQP_REDUCTION_TEST_SOURCES test_reduction.cpp)
 set(PBQP_C_API_TEST_SOURCES test_c_api.c)
+set(PBQP_INTERNAL_TEST_SOURCES test_search_internals.cpp)
+set(PBQP_INTERNAL_TEST_SUPPORT search_test_support.cpp)
 pbqp_register_format_sources(${PBQP_TEST_SOURCES} ${PBQP_REDUCTION_TEST_SOURCES}
-  ${PBQP_C_API_TEST_SOURCES} ${PBQP_PARALLEL_TEST_SOURCES})
+  ${PBQP_C_API_TEST_SOURCES} ${PBQP_PARALLEL_TEST_SOURCES}
+  ${PBQP_INTERNAL_TEST_SOURCES} ${PBQP_INTERNAL_TEST_SUPPORT})
 set(PBQP_FORMAT_SOURCES "${PBQP_FORMAT_SOURCES}" PARENT_SCOPE)
 
 if(NOT BUILD_TESTING)
@@ -30,6 +33,14 @@ add_executable(test_reduction ${PBQP_REDUCTION_TEST_SOURCES})
 target_link_libraries(test_reduction PRIVATE pbqp)
 pbqp_configure_cxx_target(test_reduction PRIVATE)
 add_test(NAME reduction COMMAND test_reduction)
+
+# Compile private-module test support in the owning target; clients cannot
+# import private partitions. The bridge is absent with BUILD_TESTING=OFF.
+target_sources(pbqp PRIVATE ${PBQP_INTERNAL_TEST_SUPPORT})
+add_executable(test_search_internals ${PBQP_INTERNAL_TEST_SOURCES})
+target_link_libraries(test_search_internals PRIVATE pbqp)
+pbqp_configure_cxx_target(test_search_internals PRIVATE)
+add_test(NAME search_internals COMMAND test_search_internals)
 
 add_executable(test_c_api ${PBQP_C_API_TEST_SOURCES})
 target_link_libraries(test_c_api PRIVATE pbqp)

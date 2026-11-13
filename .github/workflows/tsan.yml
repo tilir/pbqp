@@ -1,0 +1,38 @@
+name: ThreadSanitizer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tsan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: oneapi-src/oneTBB
+          ref: v2022.3.0
+          path: .deps/oneTBB
+      - name: Install Clang 21 and build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | gpg --dearmor > "$RUNNER_TEMP/llvm-keyring.gpg"
+          sudo install -m 0644 "$RUNNER_TEMP/llvm-keyring.gpg" /usr/share/keyrings/llvm.gpg
+          echo 'deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main' \
+            | sudo tee /etc/apt/sources.list.d/llvm-21.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-21 clang-tools-21 libclang-rt-21-dev cmake ninja-build
+      - name: Build instrumented oneTBB and run parallel tests
+        run: >-
+          cmake
+          -DPBQP_TBB_SOURCE=${{ github.workspace }}/.deps/oneTBB
+          -DPBQP_TSAN_ROOT=${{ runner.temp }}/pbqp-tsan
+          -DPBQP_BUILD_JOBS=2
+          -P cmake/RunTSan.cmake

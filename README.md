@@ -41,6 +41,6 @@ cmake --build build
 ```
 
 See the [solvers](doc/solvers.md), [file format](doc/format.md), [generator modes](doc/generation.md),
-[C API](include/pbqp.h), and [developer notes](AGENTS.md).
+[C API](include/pbqp.h), [architecture](doc/architecture.md), and [developer notes](AGENTS.md).
 
 Licensed under [GNU GPL v3](LICENSE).

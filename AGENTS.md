@@ -58,6 +58,12 @@
 
 ## Source layout
 
+See `doc/architecture.md` for subsystem responsibilities and dependency rules.
+`core` and shared `search` must not import concrete solvers. B&B orchestration
+may compose heuristic seeds; its bounds and workers remain independent of them.
+Each implementation subdirectory owns explicit source lists and propagates
+library/format aggregates to its parent; module partition names stay unchanged.
+
 - Root `CMakeLists.txt`: project setup, shared configuration, and subdirectories.
 - `src/CMakeLists.txt`, `tools/CMakeLists.txt`, `tests/CMakeLists.txt`: component
   targets and test registration. Keep target source lists with their sources.
@@ -135,11 +141,17 @@
   diagnostics, quality, and comparison with independent recursive search.
 - `tests/test_parallel_exact.cpp`: multiworker costs/naive ties, serialized progress,
   mixed domains, huge counts, no-seed cases, and independent solution ownership.
+- `tests/test_search_internals.cpp`, `tests/search_test_support.cpp`: private
+  preparation regressions through a test-only C++ linkage bridge. Compile the
+  support implementation unit in `pbqp` so partitions stay PRIVATE and are not
+  recompiled or exported for tests. Omit this bridge with `BUILD_TESTING=OFF`.
 - `tests/test_reduction.cpp`: randomized low-degree differential tests, RN
   cache invalidation, sparse shape reconstruction, and ownership checks.
 - `benchmarks/CMakeLists.txt`, `benchmarks/reduction.cpp`,
   `benchmarks/branch_and_bound.cpp`, `benchmarks/bruteforce.cpp`: optional Google
-  Benchmark star/K4 scaling, example-07 and binary-enumeration thread counts, enabled with `PBQP_BUILD_BENCHMARKS`.
+  Benchmark star/K4/subdivided-star scaling and exact-solver thread counts,
+  enabled with `PBQP_BUILD_BENCHMARKS`. `benchmarks/root_bounds.cpp` covers
+  root-solved homogeneous and one-option-center domains.
   Use `find_package(benchmark CONFIG REQUIRED)` only when enabled, linking
   `benchmark::benchmark`. Register cases with `RegisterBenchmark` and an explicit
   main, without helper macros. Register formatting sources even when disabled.
@@ -243,7 +255,13 @@ removes explicit-INF options against the fixed prefix, tightening independent
 unary and pairwise minima. Sum those terms in original reference order, never
 regrouping suffixes or pruning solely on assigned partial cost.
 
-Seed the shared incumbent from successful greedy and reduction runs. A heuristic
+Check the root bound before seeding: explicit infeasibility closes the whole
+space without running a heuristic. Try greedy next and compare its incumbent
+against that root bound. Run the reduction seed only if improvement is still
+possible; do not construct a reduction graph or R2 fill for a root already
+proved optimal. Keep seed-attempt statistics available to private tests and
+preserve deferred root progress reporting. Seed the shared incumbent from
+successful heuristic runs. A heuristic
 dead end is not infeasibility. Cost and a separate feasible flag are atomic;
 copy the winning assignment under a mutex before publication. Frequent bound
 checks never copy the incumbent assignment. Stale upper bounds allow extra work.
@@ -257,7 +275,10 @@ names in order of first appearance. Renaming preserves reference terms; do not
 apply this optimization to arbitrary PBQP matrices or unequal domains.
 
 Use an adaptive viable-prefix frontier with about 32 jobs per requested worker,
-child batches for huge domains, and a bounded planning expansion budget. The
+child batches for huge domains, and a bounded fan-out expansion budget.
+Append singleton runs in place, check their resulting prefix once, and do not
+charge them to the branching budget. A long forced prefix must not remove
+requested concurrency when branching follows it. The
 single-thread path uses the same planner but no scheduler. A oneTBB task_arena
 and task_group run fixed consumers claiming whole subtrees from an atomic
 index. Never create a task per DFS vertex or implement a custom thread pool.
@@ -281,7 +302,8 @@ nonzero options, then lowest option-zero cost, degree, and ID. Match LLVM's
 reduction scheme, without depending on its regalloc-only domain assumptions.
 Keep feasibility separate from overflowed intermediate float costs. Preserve
 frozen eliminated-node costs/edges for reverse assignment; later mutations
-must touch active adjacency only. Never scan and erase an active adjacency
+must touch active adjacency only. R2 edge lookup scans the endpoint with smaller active degree; canonical matrix
+orientation remains unchanged. Never scan and erase an active adjacency
 vector on each disconnect. Keep per-endpoint edge positions and sort each
 node's frozen edges by ID before propagation and backpropagation.
 Maintain RN availability incrementally: cache each edge direction's worst
@@ -441,7 +463,7 @@ all intermediate sums are exact. Compare feasibility and optimum cost with
 exhaustive search, without requiring identical tied tuples. Preserve input
 arrays and verify solution storage after destroying the input. Include RN
 regressions for neighbor feasibility and finite spill-priority changes.
-Large stars vary center ID and edge storage order; disconnected K4s exercise
+Large stars and subdivided stars vary center ID and edge storage order; disconnected K4s exercise
 repeated RN selection. Keep wall-clock thresholds out of ordinary CTest.
 Heartbeat tests cover the C callback, unchanged solver output, the complete
 1..100 notification sequence, empty and infeasible searches, and no early
@@ -471,7 +493,10 @@ cmake --build build-clang-modules --target pbqp_benchmark_reduction
   --benchmark_out=/tmp/pbqp-reduction.json --benchmark_out_format=json
 ```
 
-`Reduction/Star` and `Reduction/K4` cover 8k, 16k, 32k, and 64k nodes. Google
+`Reduction/Star` and `Reduction/K4` cover 8k, 16k, 32k, and 64k nodes.
+`Reduction/SubdividedStar/HubLow` and `/HubHigh` cover 4k/8k/16k/32k arms,
+with ordered or shuffled edge storage. HubLow forces repeated R2 fill beside
+an active high-degree hub, exposing quadratic adjacency lookup. Google
 Benchmark controls iterations, repetitions, timing, statistics, and output.
 Use `--benchmark_list_tests` to list cases and `--benchmark_filter=Reduction/K4`
 to select a family. Each case reports node/edge counters, nodes processed per
@@ -501,6 +526,16 @@ cmake --build build-clang-modules --target pbqp_benchmark_naive
 ./build-clang-modules/pbqp_benchmark_naive --benchmark_repetitions=3
 ```
 
+`pbqp_benchmark_root_bounds` measures zero-cost three-node paths with domain
+sizes 64/128/256 and either an equally sized or one-option center. Root proofs
+must bypass cubic reduction work and quadratic fill amplification. Private
+regressions assert the seed-attempt flags, with no wall-clock thresholds.
+
+```sh
+cmake --build build-clang-modules --target pbqp_benchmark_root_bounds
+./build-clang-modules/pbqp_benchmark_root_bounds --benchmark_repetitions=3
+```
+
 Do not add a full example-07 solve to ordinary CTest. The optimum is zero;
 all terms are nonnegative and the returned zero-cost coloring is feasible.
 
@@ -527,10 +562,17 @@ case, run the same tests with `ASAN_OPTIONS=detect_leaks=0` and report that
 leak checking was unavailable. Documentation-only changes do not require
 rebuilding or rerunning the test suite.
 
-For ThreadSanitizer, instrument both PBQP and oneTBB. Build a separate oneTBB
-with `-DTBB_SANITIZE=thread`, then configure a separate PBQP build with
-`-fsanitize=thread` compile/link flags and `TBB_DIR` pointing to that installation.
-Run `test_parallel_exact` there. An uninstrumented system TBB can produce
-scheduler synchronization reports even for a minimal task-group example;
-do not suppress them to claim a clean PBQP run. The instrumented oneTBB
-2022.3.0 build passes this test with Clang 21.
+For ThreadSanitizer, instrument both PBQP and oneTBB. The script consumes an
+existing oneTBB source checkout; it never downloads a scheduler automatically:
+
+```sh
+cmake -DPBQP_TBB_SOURCE=/path/to/oneTBB \
+  -DPBQP_TSAN_ROOT=/tmp/pbqp-tsan -P cmake/RunTSan.cmake
+```
+
+It configures separate Debug builds with Clang 21, installs the instrumented
+TBB under the chosen root, builds the actual module project, and runs parallel
+and private-preparation tests with `TSAN_OPTIONS=halt_on_error=1`. The manual
+`.github/workflows/tsan.yml` uses oneTBB v2022.3.0 and the same script.
+An uninstrumented system TBB can produce scheduler synchronization reports even
+for a minimal task-group example; do not suppress them to claim a clean run.

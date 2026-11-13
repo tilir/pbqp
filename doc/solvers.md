@@ -36,6 +36,13 @@ lexicographic tie rule. `--numthreads=N` is positive, defaults to 1, and is
 accepted by both exact solvers. It limits oneTBB arena concurrency, including the caller;
 workload size and available TBB resources may reduce actual concurrency.
 
+Preparation checks the root bound first. A root infeasibility proof skips both
+heuristics. Otherwise greedy supplies a cheap initial incumbent; if its cost
+matches the root lower bound, the optimum is already proved. Reduction runs
+only when a better incumbent can still matter, avoiding unnecessary cubic R2
+work and fill allocations on trivially solved inputs. Both root proofs retain
+full covered-space progress, reported after successful preparation.
+
 Greedy and reduction supply initial feasible incumbents. Failure of either
 heuristic supplies no bound and never proves infeasibility. Improvements are
 committed under a mutex: recheck the candidate, copy its assignment, then publish
@@ -71,7 +78,9 @@ PBQP inputs use the unrestricted search.
 Preparation grows a frontier of viable prefixes toward roughly 32 coarse jobs
 per requested thread. Depth follows available work and heterogeneous domains,
 rather than a fixed number of nodes. Very large domains group adjacent child
-prefixes; planning also has a finite expansion budget. Prefixes already closed
+prefixes; planning also has a finite fan-out expansion budget. Runs of
+single-option nodes are appended in place and checked once, without consuming
+that budget, so a long forced prefix does not prevent later parallel branching. Prefixes already closed
 during planning are retained as progress events. The same planning policy helps
 single-thread search, which executes directly without invoking the TBB scheduler.
 
@@ -94,6 +103,14 @@ its optimum is zero. It is available as an optional Google Benchmark case for
 1/2/4/8 threads, rather than an exhaustive routine CTest workload. Timing includes
 prefix planning and the resulting search; changes in planning and incumbent
 arrival can change the amount of work as well as how many CPUs execute it.
+
+The frontier stays fixed after planning. TBB schedules whole consumers, and
+cannot steal a descendant from a worker's active DFS. A difficult final job can
+therefore leave other workers idle. Before introducing dynamic splitting,
+profile bounds evaluated, pruned prefixes, completed jobs, and final-job time
+per worker, together with separate preparation, seeding, planning, and search
+times. Wall-time speedup alone cannot distinguish parallel execution from a
+better order of incumbent discoveries.
 
 Both examples show the benefit of exact search over the heuristics. Example 08
 also has enough search work to demonstrate parallel speedup; its benchmark

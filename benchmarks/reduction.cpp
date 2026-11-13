@@ -1,5 +1,5 @@
 /*
- * Google Benchmark scalability cases for stars and disjoint K4 components.
+ * Google Benchmark scalability cases for stars, subdivided stars, and K4s.
  *
  * Times the public reduction API and returned-solution cleanup, including API
  * validation, preparation, and reconstruction. Graph construction and preflight
@@ -10,8 +10,10 @@
  * See LICENSE for the full license text.
  */
 #include "pbqp.h"
+#include <algorithm>
 #include <benchmark/benchmark.h>
 #include <memory>
+#include <random>
 #include <vector>
 
 namespace {
@@ -44,6 +46,31 @@ bool check_result(benchmark::State &state, const pbqp_problem &problem,
   return true;
 }
 
+void measure(benchmark::State &state, const pbqp_problem &problem,
+             pbqp_cost_t expected) {
+  if (!check_result(state, problem, expected))
+    return;
+
+  for (auto iteration : state) {
+    pbqp_solution *raw = nullptr;
+    pbqp_error error{};
+    auto status = pbqp_solve_reduction(&problem, &raw, &error);
+    SolutionPtr solution(raw);
+    if (status != PBQP_OK) {
+      state.SkipWithError(error.message);
+      break;
+    }
+    benchmark::DoNotOptimize(solution->cost);
+  }
+  state.SetComplexityN(
+      static_cast<benchmark::IterationCount>(problem.num_nodes));
+  state.SetItemsProcessed(
+      state.iterations() *
+      static_cast<benchmark::IterationCount>(problem.num_nodes));
+  state.counters["nodes"] = static_cast<double>(problem.num_nodes);
+  state.counters["edges"] = static_cast<double>(problem.num_edges);
+}
+
 void reduction(benchmark::State &state, Shape shape) {
   size_t count = static_cast<size_t>(state.range(0));
   const pbqp_cost_t unary[] = {1, 0};
@@ -65,24 +92,35 @@ void reduction(benchmark::State &state, Shape shape) {
                              edges.data()};
   pbqp_cost_t expected =
       shape == Shape::Star ? 1 : static_cast<pbqp_cost_t>(3 * (count / 4));
-  if (!check_result(state, problem, expected))
-    return;
+  measure(state, problem, expected);
+}
 
-  for (auto iteration : state) {
-    pbqp_solution *raw = nullptr;
-    pbqp_error error{};
-    auto status = pbqp_solve_reduction(&problem, &raw, &error);
-    SolutionPtr solution(raw);
-    if (status != PBQP_OK) {
-      state.SkipWithError(error.message);
-      break;
+void subdivided_star(benchmark::State &state, bool reverse_ids) {
+  size_t arms = static_cast<size_t>(state.range(0));
+  size_t count = 2 * arms + 1;
+  const pbqp_cost_t unary[] = {0, 0};
+  const pbqp_cost_t matrix[] = {0, 0, 0, 0};
+  std::vector<pbqp_node> nodes(count, pbqp_node{2, unary});
+  std::vector<pbqp_edge> edges;
+  edges.reserve(2 * arms);
+  auto add = [&](size_t src, size_t tgt) {
+    if (reverse_ids) {
+      src = count - 1 - src;
+      tgt = count - 1 - tgt;
     }
-    benchmark::DoNotOptimize(solution->cost);
+    edges.push_back({std::min(src, tgt), std::max(src, tgt), matrix});
+  };
+  for (size_t id = 1; id <= arms; ++id) {
+    add(0, id);
+    add(id, arms + id);
   }
-  state.SetComplexityN(state.range(0));
-  state.SetItemsProcessed(state.iterations() * state.range(0));
-  state.counters["nodes"] = static_cast<double>(nodes.size());
-  state.counters["edges"] = static_cast<double>(edges.size());
+  if (state.range(1)) {
+    std::mt19937 random(42);
+    std::shuffle(edges.begin(), edges.end(), random);
+  }
+  const pbqp_problem problem{nodes.size(), edges.size(), nodes.data(),
+                             edges.data()};
+  measure(state, problem, 0);
 }
 
 void register_benchmarks() {
@@ -102,6 +140,17 @@ void register_benchmarks() {
       ->Arg(64000)
       ->Unit(benchmark::kMillisecond)
       ->Complexity();
+  for (bool reverse_ids : {false, true}) {
+    auto *cases = benchmark::RegisterBenchmark(
+        reverse_ids ? "Reduction/SubdividedStar/HubHigh"
+                    : "Reduction/SubdividedStar/HubLow",
+        subdivided_star, reverse_ids);
+    cases->ArgNames({"arms", "shuffled"});
+    for (int arms : {4000, 8000, 16000, 32000})
+      for (int shuffled : {0, 1})
+        cases->Args({arms, shuffled});
+    cases->Unit(benchmark::kMillisecond)->Complexity();
+  }
 }
 } // namespace
 

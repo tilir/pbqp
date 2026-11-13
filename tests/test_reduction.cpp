@@ -261,6 +261,33 @@ void test_sparse_shapes() {
   components.shuffle_edges(random);
   auto solution = solve_reduction(components.view());
   check(solution->cost == 3 * count / 4);
+
+  constexpr size_t arms = 2048;
+  constexpr size_t size = 2 * arms + 1;
+  for (size_t center : {size_t{0}, arms, size - 1}) {
+    context = "subdivided star center=" + std::to_string(center);
+    Fixture star(size);
+    for (size_t id = 0; id < size; ++id)
+      star.set_node(id, {1, 0});
+    auto mapped = [&](size_t id) {
+      if (id == 0)
+        return center;
+      return id == center ? size_t{0} : id;
+    };
+    auto add = [&](size_t src, size_t tgt) {
+      src = mapped(src);
+      tgt = mapped(tgt);
+      star.add_edge(std::min(src, tgt), std::max(src, tgt),
+                    {0, 0, 0, PBQP_INF});
+    };
+    for (size_t id = 1; id <= arms; ++id) {
+      add(0, id);
+      add(id, arms + id);
+    }
+    star.shuffle_edges(random);
+    solution = solve_reduction(star.view());
+    check(solution->cost == arms);
+  }
 }
 } // namespace
 

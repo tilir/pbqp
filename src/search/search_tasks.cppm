@@ -74,16 +74,24 @@ PrefixPlan plan_prefixes(const pbqp_problem &problem, size_t threads,
   PrefixTask root;
   if (retain(root))
     frontier.push_back(std::move(root));
-  for (size_t expanded = 0;
-       !frontier.empty() && frontier.size() + plan.tasks.size() < target &&
-       expanded < budget;
-       ++expanded) {
+  for (size_t expanded = 0; !frontier.empty() &&
+                            frontier.size() + plan.tasks.size() < target &&
+                            expanded < budget;) {
     auto parent = std::move(frontier.front());
     frontier.pop_front();
+    size_t original_depth = parent.ranks.size();
+    // Singleton runs introduce no branching. Append them in place and check
+    // the resulting prefix once; do not spend the fan-out budget on them.
+    while (parent.ranks.size() < problem.num_nodes &&
+           problem.nodes[parent.ranks.size()].num_options == 1)
+      parent.ranks.push_back(0);
+    if (parent.ranks.size() != original_depth && !retain(parent))
+      continue;
     if (parent.ranks.size() == problem.num_nodes) {
       plan.tasks.push_back(std::move(parent));
       continue;
     }
+    ++expanded;
     size_t domain = problem.nodes[parent.ranks.size()].num_options;
     size_t slots = target - frontier.size() - plan.tasks.size();
     if (domain > slots) {

@@ -5,7 +5,8 @@
 set(PBQP_REDUCTION_BENCHMARK_SOURCES reduction.cpp)
 set(PBQP_NAIVE_BENCHMARK_SOURCES bruteforce.cpp)
 set(PBQP_BNB_BENCHMARK_SOURCES branch_and_bound.cpp)
-pbqp_register_format_sources(${PBQP_REDUCTION_BENCHMARK_SOURCES} ${PBQP_BNB_BENCHMARK_SOURCES} ${PBQP_NAIVE_BENCHMARK_SOURCES})
+set(PBQP_ROOT_BENCHMARK_SOURCES root_bounds.cpp)
+pbqp_register_format_sources(${PBQP_REDUCTION_BENCHMARK_SOURCES} ${PBQP_BNB_BENCHMARK_SOURCES} ${PBQP_NAIVE_BENCHMARK_SOURCES} ${PBQP_ROOT_BENCHMARK_SOURCES})
 set(PBQP_FORMAT_SOURCES "${PBQP_FORMAT_SOURCES}" PARENT_SCOPE)
 
 option(PBQP_BUILD_BENCHMARKS "Build Google Benchmark scalability benchmarks" OFF)
@@ -26,3 +27,7 @@ pbqp_configure_cxx_target(pbqp_benchmark_bnb PRIVATE)
 add_executable(pbqp_benchmark_naive ${PBQP_NAIVE_BENCHMARK_SOURCES})
 target_link_libraries(pbqp_benchmark_naive PRIVATE pbqp benchmark::benchmark)
 pbqp_configure_cxx_target(pbqp_benchmark_naive PRIVATE)
+
+add_executable(pbqp_benchmark_root_bounds ${PBQP_ROOT_BENCHMARK_SOURCES})
+target_link_libraries(pbqp_benchmark_root_bounds PRIVATE pbqp benchmark::benchmark)
+pbqp_configure_cxx_target(pbqp_benchmark_root_bounds PRIVATE)

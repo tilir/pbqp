@@ -30,6 +30,13 @@ import :reduction;
 
 namespace pbqp {
 class BranchAndBoundSearch {
+public:
+  struct SeedStatistics {
+    bool greedy = false;
+    bool reduction = false;
+  };
+
+private:
   BranchAndBoundBounds bounds;
   BranchAndBoundIncumbent incumbent;
   size_t num_threads;
@@ -38,8 +45,9 @@ class BranchAndBoundSearch {
   std::vector<BranchAndBoundWorker> workers;
   std::unique_ptr<SubtreeProgress> progress;
   std::vector<SubtreeProgress::Accumulator> progress_workers;
+  SeedStatistics seeds;
 
-  void seed_incumbent();
+  void seed_incumbent(pbqp_cost_t root_bound);
   void consume(size_t index) noexcept;
   template <class Observer, class Completed>
   void consume_tasks(size_t index, Observer observe,
@@ -59,6 +67,7 @@ public:
       progress = std::make_unique<SubtreeProgress>(p, callback, data);
   }
   void prepare();
+  const SeedStatistics &seed_statistics() const noexcept { return seeds; }
   pbqp_status run(pbqp_error *error);
   pbqp_solution *release_solution() noexcept {
     return incumbent.release_solution();
@@ -75,13 +84,17 @@ void BranchAndBoundSearch::consume(size_t index) noexcept {
     consume_tasks(index, [](size_t) noexcept {}, []() noexcept {});
 }
 
-void BranchAndBoundSearch::seed_incumbent() {
+void BranchAndBoundSearch::seed_incumbent(pbqp_cost_t root_bound) {
   const auto &problem = bounds.input();
+  seeds.greedy = true;
   GreedySearch greedy(problem);
   if (greedy.prepare(nullptr) == PBQP_OK && greedy.run(nullptr) == PBQP_OK) {
     const auto &seed = greedy.get_solution();
     incumbent.update(seed.options, seed.cost);
   }
+  if (!incumbent.can_improve(root_bound))
+    return;
+  seeds.reduction = true;
   ReductionSearch reduction(problem);
   reduction.prepare();
   if (reduction.run(nullptr) == PBQP_OK) {
@@ -91,7 +104,17 @@ void BranchAndBoundSearch::seed_incumbent() {
 }
 
 void BranchAndBoundSearch::prepare() {
-  seed_incumbent();
+  BranchAndBoundBounds::Workspace root_workspace(bounds);
+  pbqp_cost_t root_bound;
+  if (!bounds.lower_bound(nullptr, 0, root_workspace, root_bound)) {
+    plan.covered_depths.push_back(0);
+    return;
+  }
+  seed_incumbent(root_bound);
+  if (!incumbent.can_improve(root_bound)) {
+    plan.covered_depths.push_back(0);
+    return;
+  }
   PrefixPlanner planner(bounds, incumbent);
   plan = planner.build(num_threads);
   size_t count = std::min(num_threads, plan.tasks.size());

@@ -136,6 +136,9 @@ ReductionCost ReductionGraph::cost(size_t edge, size_t node, size_t option,
 }
 
 size_t ReductionGraph::find_edge(size_t src, size_t tgt) const noexcept {
+  // Lookup is undirected; matrix orientation remains canonical in merge_edge.
+  if (nodes[src].edges.size() > nodes[tgt].edges.size())
+    std::swap(src, tgt);
   for (size_t edge : nodes[src].edges)
     if (other(edge, src) == tgt)
       return edge;
