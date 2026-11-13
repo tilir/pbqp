@@ -38,7 +38,7 @@
   Wrap their definitions explicitly in `extern "C"` so they match the global
   declarations from `pbqp.h`. The public header remains includable from C;
   callers do not need to import modules.
-- Keep oneTBB task/scheduler headers and calls in `src/parallel.cpp`, a
+- Keep oneTBB task/scheduler headers and calls in `src/search/parallel.cpp`, a
   module implementation unit. GCC cannot serialize some TU-local TBB helpers
   from a partition; do not work around this by suppressing diagnostics or
   exporting internal names. Worker and planner declarations stay in partitions.
@@ -73,56 +73,56 @@
 - `include/pbqp.h`: public types, inline cost algebra, API declarations, and
   contracts for validation, ownership, diagnostics, and solution quality.
 - `src/pbqp.cppm`: primary module interface with no exported internal names.
-- `src/text_reader.cppm`: private `:text_reader` partition containing the stream
+- `src/io/text_reader.cppm`: private `:text_reader` partition containing the stream
   tokenizer, comment handling, line tracking, and numeric parser.
-- `src/text_writer.cppm`: private `:text_writer` partition for cost serialization.
-- `src/problem.cppm`: private `:problem` partition containing structural
+- `src/io/text_writer.cppm`: private `:text_writer` partition for cost serialization.
+- `src/core/problem.cppm`: private `:problem` partition containing structural
   validation and dimension checks.
-- `src/problem_api.cpp`: C problem destruction and validation entry points.
-- `src/io.cpp`: C text input/output entry points and error translation.
-- `src/error.cppm`: private `:error` partition with non-throwing diagnostics.
-- `src/failure.cppm`: private `:failure` partition for parsing/validation errors.
-- `src/api_boundary.cppm`: shared C API exception translation, including
+- `src/api/problem_api.cpp`: C problem destruction and validation entry points.
+- `src/api/io.cpp`: C text input/output entry points and error translation.
+- `src/api/error.cppm`: private `:error` partition with non-throwing diagnostics.
+- `src/core/failure.cppm`: private `:failure` partition for parsing/validation errors.
+- `src/api/api_boundary.cppm`: shared C API exception translation, including
   allocation failures and container size limits.
-- `src/ownership.cppm`: vector-backed problem and solution storage behind C
+- `src/core/ownership.cppm`: vector-backed problem and solution storage behind C
   views, with RAII ownership helpers.
-- `src/evaluation.cppm`: shared reference evaluator for validated assignments.
-- `src/progress.cppm`: exact percentage boundaries for mixed-radix enumeration
+- `src/core/evaluation.cppm`: shared reference evaluator for validated assignments.
+- `src/search/progress.cppm`: exact percentage boundaries for mixed-radix enumeration
   without multiplying domain sizes into a fixed-width counter.
-- `src/solution.cpp`: public assignment evaluator and solution destruction.
-- `src/bruteforce.cpp`: validation and ownership boundary for exhaustive search.
-- `src/bruteforce.cppm`: direct single-thread lexicographic reference enumeration.
-- `src/bruteforce_parallel.cppm`: private exhaustive workers, ordered coarse jobs,
+- `src/api/solution.cpp`: public assignment evaluator and solution destruction.
+- `src/api/bruteforce.cpp`: validation and ownership boundary for exhaustive search.
+- `src/solvers/naive/bruteforce.cppm`: direct single-thread lexicographic reference enumeration.
+- `src/solvers/naive/bruteforce_parallel.cppm`: private exhaustive workers, ordered coarse jobs,
   and a final cost/lexicographic reduction without per-tuple shared-best locking.
-- `src/branch_and_bound.cpp`: validation and ownership boundary for exact search.
-- `src/branch_and_bound.cppm`: coarse prefix queue and per-worker orchestration.
-- `src/bnb_bounds.cppm`: immutable minima, option order, checked regalloc symmetry,
+- `src/api/branch_and_bound.cpp`: validation and ownership boundary for exact search.
+- `src/solvers/bnb/branch_and_bound.cppm`: coarse prefix queue and per-worker orchestration.
+- `src/solvers/bnb/bnb_bounds.cppm`: immutable minima, option order, checked regalloc symmetry,
   forward checking, and reference-order conditioned bounds. Keep construction
   as named preparation steps and individual bound terms as small helpers.
-- `src/bnb_incumbent.cppm`: mutex-protected assignment and atomic cost/feasibility.
-- `src/bnb_tasks.cppm`: adaptive viable-prefix frontier and large-domain batches.
-- `src/bnb_worker.cppm`: private assignment/cursors/scratch/local best and iterative
+- `src/solvers/bnb/bnb_incumbent.cppm`: mutex-protected assignment and atomic cost/feasibility.
+- `src/solvers/bnb/bnb_tasks.cppm`: adaptive viable-prefix frontier and large-domain batches.
+- `src/solvers/bnb/bnb_worker.cppm`: private assignment/cursors/scratch/local best and iterative
   allocation-free DFS within one prefix subtree.
-- `src/search_progress.cppm`: shared serialized mixed-radix covered-space counts.
-- `src/search_tasks.cppm`: shared prefix descriptors/planning and atomic tickets.
-- `src/parallel.cppm`: private synchronous TBB dispatch declaration.
-- `src/parallel.cpp`: shared oneTBB arena/task-group implementation bridge.
-- `src/greedy.cpp`: validation and ownership boundary for the greedy C API.
-- `src/greedy.cppm`: private `:greedy` partition with `GreedySearch`, separating
+- `src/search/search_progress.cppm`: shared serialized mixed-radix covered-space counts.
+- `src/search/search_tasks.cppm`: shared prefix descriptors/planning and atomic tickets.
+- `src/search/parallel.cppm`: private synchronous TBB dispatch declaration.
+- `src/search/parallel.cpp`: shared oneTBB arena/task-group implementation bridge.
+- `src/api/greedy.cpp`: validation and ownership boundary for the greedy C API.
+- `src/solvers/greedy/greedy.cppm`: private `:greedy` partition with `GreedySearch`, separating
   workspace allocation, node priorities, edge indexing, option scoring, and
   assignment. Preparation allocates all search storage; `run` does not allocate,
   backtrack, or claim optimality.
-- `src/reduction_graph.cppm`: private `:reduction_graph` partition with owned
+- `src/solvers/reduction/reduction_graph.cppm`: private `:reduction_graph` partition with owned
   costs, indexed active adjacency, frozen eliminated adjacency, and R2 fill.
   Swap-and-pop removal updates edge positions at the affected endpoint. Sort
   adjacency by edge ID once on freezing to preserve arithmetic order.
   Intermediate feasibility is independent of the float score.
-- `src/reduction_worklist.cppm`: incremental low-degree, safe, and spill queues
+- `src/solvers/reduction/reduction_worklist.cppm`: incremental low-degree, safe, and spill queues
   with cached directed edge contributions and batched node-priority refreshes.
-- `src/reduction.cppm`: private `:reduction` partition with `ReductionSearch`.
+- `src/solvers/reduction/reduction.cppm`: private `:reduction` partition with `ReductionSearch`.
   Preparation applies R0/R1/R2/RN and allocates fill matrices; `run` performs
   allocation-free reverse assignment and reference evaluation.
-- `src/reduction.cpp`: validation and ownership boundary for the heuristic C API.
+- `src/api/reduction.cpp`: validation and ownership boundary for the heuristic C API.
 - `tools/pbqp.cpp`: named solver selection and solver CLI. Exception handling
   covers C++ argument parsing only; C API calls report statuses.
 - `tools/command_line.cppm`: shared `pbqp.command_line` module for named options,
