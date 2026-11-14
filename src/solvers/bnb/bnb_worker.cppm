@@ -17,6 +17,32 @@ import :bnb_incumbent;
 import :bnb_work_queue;
 import :ownership;
 namespace pbqp {
+// Non-template ownership keeps container destruction in this module unit.
+// In particular, API consumers do not instantiate an allocator for nested
+// vectors of a worker template's private Child type across module boundaries.
+struct BranchAndBoundLookahead {
+  struct Child {
+    pbqp_cost_t bound = 0;
+    bool live = false;
+  };
+  std::vector<std::vector<Child>> children;
+  std::vector<double> weight, child_weight;
+  size_t scan = 0, survivors = 0;
+  bool preparing = false;
+
+  explicit BranchAndBoundLookahead(const pbqp_problem &domains);
+  ~BranchAndBoundLookahead() noexcept;
+};
+
+BranchAndBoundLookahead::BranchAndBoundLookahead(const pbqp_problem &domains)
+    : children(domains.num_nodes), weight(domains.num_nodes + 1),
+      child_weight(domains.num_nodes) {
+  for (size_t step = 0; step < domains.num_nodes; ++step)
+    children[step].resize(domains.nodes[step].num_options);
+}
+
+BranchAndBoundLookahead::~BranchAndBoundLookahead() noexcept = default;
+
 template <typename Bounds> class BranchAndBoundWorker {
   const Bounds &bounds;
   BranchAndBoundIncumbent &incumbent;
@@ -24,26 +50,9 @@ template <typename Bounds> class BranchAndBoundWorker {
   std::vector<pbqp_cost_t> parent_bound;
   typename Bounds::Workspace workspace;
   SolutionPtr best;
-  // Optional lookahead caches each child's bound once per parent. Storage is
-  // allocated before dispatch; the ordinary no-heartbeat DFS does not use it.
-  struct Lookahead {
-    struct Child {
-      pbqp_cost_t bound = 0;
-      bool live = false;
-    };
-    std::vector<std::vector<Child>> children;
-    std::vector<double> weight, child_weight;
-    size_t scan = 0, survivors = 0;
-    bool preparing = false;
-
-    explicit Lookahead(const pbqp_problem &domains)
-        : children(domains.num_nodes), weight(domains.num_nodes + 1),
-          child_weight(domains.num_nodes) {
-      for (size_t step = 0; step < domains.num_nodes; ++step)
-        children[step].resize(domains.nodes[step].num_options);
-    }
-  };
-  std::unique_ptr<Lookahead> lookahead;
+  // Optional child-bound storage is allocated before dispatch. Ordinary DFS
+  // does not allocate or use this cache.
+  std::unique_ptr<BranchAndBoundLookahead> lookahead;
   bool found = false, batch = false, busy = false;
   size_t base = 0, root = 0, depth = 0;
   bool advance() noexcept {
@@ -184,7 +193,7 @@ public:
         best(make_solution(tuple.size())) {
     task.ranks.reserve(tuple.size());
     if (estimate_progress)
-      lookahead = std::make_unique<Lookahead>(bounds.domains());
+      lookahead = std::make_unique<BranchAndBoundLookahead>(bounds.domains());
   }
   bool active() const noexcept { return busy; }
   void start(pbqp_cost_t bound) noexcept {

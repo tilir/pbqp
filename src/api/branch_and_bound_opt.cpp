@@ -2,7 +2,8 @@
  * Public C entry points for optimized exact branch-and-bound search.
  *
  * Validates borrowed inputs and transfers independent solution storage only
- * after search has proved optimality. Optional callbacks report covered space.
+ * after search has proved optimality. Optional callbacks report approximate
+ * progress.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  * Distributed under GNU GPL version 3, WITHOUT ANY WARRANTY.
