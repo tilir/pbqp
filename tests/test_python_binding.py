@@ -21,7 +21,7 @@ class BindingTests(unittest.TestCase):
         self.library = Library(LIBRARY)
 
     def test_all_solvers_and_lifetime(self):
-        self.assertEqual(self.library.version, (2, 0, 0))
+        self.assertEqual(self.library.version, (2, 1, 0))
         with self.library.read(EXAMPLE) as problem:
             solutions = []
             for solver in Solver:

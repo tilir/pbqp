@@ -23,3 +23,8 @@ target_include_directories(pbqp PUBLIC "${PROJECT_SOURCE_DIR}/include")
 pbqp_configure_cxx_target(pbqp PRIVATE)
 
 set(PBQP_FORMAT_SOURCES "${PBQP_FORMAT_SOURCES}" PARENT_SCOPE)
+
+# Production library inputs are also part of the generator's serialization
+# identity. Reuse component aggregates so new units cannot silently be omitted.
+set(PBQP_LIBRARY_INPUTS ${PBQP_LIBRARY_SOURCES} ${PBQP_LIBRARY_MODULES}
+  ${PBQP_PUBLIC_HEADERS} PARENT_SCOPE)

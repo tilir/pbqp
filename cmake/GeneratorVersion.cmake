@@ -2,28 +2,36 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # See LICENSE for the full license text.
 
-function(pbqp_generator_version target)
-  set(version_sources
-    tools/generator.cppm
-    tools/generator.cpp
-    tools/sampling.cppm
-    tools/generate.cpp
-    tools/command_line.cppm
-    tools/generator_version.hpp.in
-    src/io/problem_writer.cppm
-    src/io/text_writer.cppm
-    include/pbqp.h
-    cmake/GeneratorVersion.cmake)
-  set(fingerprint_input "${PROJECT_VERSION}\n")
+function(pbqp_source_fingerprint result root version)
+  set(version_sources ${ARGN})
+  set(paths "")
   foreach(source IN LISTS version_sources)
-    set(path "${pbqp_SOURCE_DIR}/${source}")
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${path}")
-    file(SHA256 "${path}" digest)
+    get_filename_component(path "${source}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    list(APPEND paths "${path}")
+  endforeach()
+  list(REMOVE_DUPLICATES paths)
+  list(SORT paths)
+  set(fingerprint_input "${version}\n")
+  foreach(path IN LISTS paths)
+    file(RELATIVE_PATH source "${root}" "${path}")
+    file(READ "${path}" content)
+    string(REPLACE "\r\n" "\n" content "${content}")
+    string(SHA256 digest "${content}")
     string(APPEND fingerprint_input "${source}:${digest}\n")
   endforeach()
-  string(SHA256 PBQP_GENERATOR_FINGERPRINT "${fingerprint_input}")
+  string(SHA256 fingerprint "${fingerprint_input}")
+  set(${result} "${fingerprint}" PARENT_SCOPE)
+endfunction()
+
+function(pbqp_generator_version target template)
+  set(version_sources ${ARGN} "${template}" "${CMAKE_CURRENT_FUNCTION_LIST_FILE}")
+  foreach(source IN LISTS version_sources)
+    get_filename_component(path "${source}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${path}")
+  endforeach()
+  pbqp_source_fingerprint(PBQP_GENERATOR_FINGERPRINT "${pbqp_SOURCE_DIR}"
+    "${PROJECT_VERSION}" ${version_sources})
   set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
-  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/generator_version.hpp.in"
-    "${generated_dir}/generator_version.hpp" @ONLY)
+  configure_file("${template}" "${generated_dir}/generator_version.hpp" @ONLY)
   target_include_directories(${target} PRIVATE "${generated_dir}")
 endfunction()

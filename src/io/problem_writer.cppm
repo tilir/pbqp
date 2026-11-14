@@ -47,9 +47,25 @@ struct MatrixView {
 
   bool operator==(const MatrixView &other) const noexcept {
     return rows == other.rows && cols == other.cols &&
-           std::equal(
-               values().begin(), values().end(), other.values().begin(),
-               [](auto a, auto b) { return TextCost{a} == TextCost{b}; });
+           (costs == other.costs ||
+            std::equal(
+                values().begin(), values().end(), other.values().begin(),
+                [](auto a, auto b) { return TextCost{a} == TextCost{b}; }));
+  }
+};
+
+struct MatrixIdentity {
+  size_t rows, cols;
+  const pbqp_cost_t *costs;
+
+  bool operator==(const MatrixIdentity &) const = default;
+};
+
+struct MatrixIdentityHash {
+  size_t operator()(const MatrixIdentity &matrix) const noexcept {
+    return std::hash<const pbqp_cost_t *>{}(matrix.costs) ^
+           std::hash<size_t>{}(matrix.rows) ^
+           (std::hash<size_t>{}(matrix.cols) << 1);
   }
 };
 
@@ -94,7 +110,7 @@ MatrixEncoding::MatrixEncoding(MatrixView view)
   }
   exceptions = static_cast<size_t>(std::count_if(
       matrix.values().begin(), matrix.values().end(),
-      [&](auto cost) { return !(TextCost{cost} == TextCost{default_cost}); }));
+      [&](auto cost) { return TextCost{cost} != TextCost{default_cost}; }));
 }
 
 void MatrixEncoding::write(std::ostream &output, size_t id) const {
@@ -107,7 +123,7 @@ void MatrixEncoding::write(std::ostream &output, size_t id) const {
     write_cost(output, default_cost);
     output << ' ' << exceptions << '\n';
     for (size_t index = 0; index < count; ++index)
-      if (!(TextCost{matrix.costs[index]} == TextCost{default_cost})) {
+      if (TextCost{matrix.costs[index]} != TextCost{default_cost}) {
         output << index / matrix.cols << ' ' << index % matrix.cols << ' ';
         write_cost(output, matrix.costs[index]);
         output << '\n';
@@ -133,14 +149,21 @@ public:
 
 ProblemWriter::ProblemWriter(const pbqp_problem &p) : problem(p) {
   std::unordered_map<MatrixView, size_t, MatrixHash> ids;
+  std::unordered_map<MatrixIdentity, size_t, MatrixIdentityHash> pointers;
   references.reserve(p.num_edges);
   for (size_t id = 0; id < p.num_edges; ++id) {
     const auto &edge = p.edges[id];
     MatrixView matrix{p.nodes[edge.src].num_options,
                       p.nodes[edge.tgt].num_options, edge.costs};
-    auto [entry, added] = ids.emplace(matrix, matrices.size());
+    const MatrixIdentity identity{matrix.rows, matrix.cols, matrix.costs};
+    if (const auto known = pointers.find(identity); known != pointers.end()) {
+      references.push_back(known->second);
+      continue;
+    }
+    auto [entry, added] = ids.try_emplace(matrix, matrices.size());
     if (added)
       matrices.emplace_back(matrix);
+    pointers.try_emplace(identity, entry->second);
     references.push_back(entry->second);
   }
 }

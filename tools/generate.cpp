@@ -14,11 +14,14 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 import pbqp.command_line;
@@ -76,6 +79,59 @@ std::string shell_quote(std::string_view argument) {
   result += '\'';
   return result;
 }
+
+// An exclusively claimed sibling directory keeps the staging path private.
+// Rename publishes task and provenance together; failure preserves the old
+// file.
+class StagedOutput {
+  std::filesystem::path target, directory, temporary;
+  bool owned = false;
+
+public:
+  explicit StagedOutput(std::string_view path) : target(path) {
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(target, error);
+    if (error && error != std::errc::no_such_file_or_directory)
+      throw std::filesystem::filesystem_error("cannot inspect output", target,
+                                              error);
+    if (std::filesystem::exists(status) &&
+        !std::filesystem::is_regular_file(status))
+      throw std::invalid_argument("generator output must be a regular file, "
+                                  "not a symlink or special file");
+    auto parent = target.parent_path();
+    if (parent.empty())
+      parent = ".";
+    std::random_device names;
+    constexpr unsigned attempts = 128;
+    for (unsigned attempt = 0; attempt < attempts; ++attempt) {
+      directory = parent / (".pbqp-generate-" + std::to_string(names()) + "-" +
+                            std::to_string(attempt));
+      temporary = directory / "problem.pbqp";
+      if (std::filesystem::create_directory(directory, error)) {
+        owned = true;
+        return;
+      }
+      if (error)
+        throw std::filesystem::filesystem_error(
+            "cannot create staging directory", directory, error);
+    }
+    throw std::runtime_error("cannot claim a generator staging directory");
+  }
+
+  ~StagedOutput() noexcept {
+    if (owned) {
+      std::error_code ignored;
+      std::filesystem::remove_all(directory, ignored);
+    }
+  }
+
+  StagedOutput(const StagedOutput &) = delete;
+  StagedOutput &operator=(const StagedOutput &) = delete;
+
+  const std::filesystem::path &path() const noexcept { return temporary; }
+
+  void publish() { std::filesystem::rename(temporary, target); }
+};
 
 void provenance(std::string_view path, int argc, char **argv) {
   std::ofstream output(std::string(path), std::ios::binary | std::ios::app);
@@ -171,12 +227,15 @@ int main(int argc, char **argv) {
     auto output = arguments.require("--output");
     const auto generated = pbqp_tools::generate_problem(options);
     auto problem = generated.view();
+    StagedOutput staged(output);
+    const auto temporary = staged.path().string();
     pbqp_error error{};
-    if (pbqp_write(output.data(), &problem, &error) != PBQP_OK) {
+    if (pbqp_write(temporary.c_str(), &problem, &error) != PBQP_OK) {
       std::cerr << error.message << '\n';
       return 1;
     }
-    provenance(output, argc, argv);
+    provenance(temporary, argc, argv);
+    staged.publish();
   } catch (const std::exception &error) {
     std::cerr << error.what() << "\nUse --help for usage.\n";
     return 1;

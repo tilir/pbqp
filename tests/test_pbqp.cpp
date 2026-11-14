@@ -28,6 +28,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 import pbqp.generator;
@@ -87,7 +88,8 @@ void same_problem(const pbqp_problem *a, const pbqp_problem *b) {
   for (i = 0; i < a->num_nodes; ++i) {
     check(a->nodes[i].num_options == b->nodes[i].num_options);
     for (j = 0; j < a->nodes[i].num_options; ++j)
-      check(a->nodes[i].costs[j] == b->nodes[i].costs[j]);
+      check(std::bit_cast<std::uint32_t>(a->nodes[i].costs[j]) ==
+            std::bit_cast<std::uint32_t>(b->nodes[i].costs[j]));
   }
   for (i = 0; i < a->num_edges; ++i) {
     check(a->edges[i].src == b->edges[i].src &&
@@ -95,7 +97,8 @@ void same_problem(const pbqp_problem *a, const pbqp_problem *b) {
     for (j = 0; j < a->nodes[a->edges[i].src].num_options *
                         a->nodes[a->edges[i].tgt].num_options;
          ++j)
-      check(a->edges[i].costs[j] == b->edges[i].costs[j]);
+      check(std::bit_cast<std::uint32_t>(a->edges[i].costs[j]) ==
+            std::bit_cast<std::uint32_t>(b->edges[i].costs[j]));
   }
 }
 
@@ -657,23 +660,26 @@ void test_format2() {
   check_reference(*parsed);
   check_roundtrip(parsed.get());
 
-  // Every truncated prefix must destroy shared arrays once and clear output.
-  // Use comment-free tokens for systematic truncation.
-  std::string plain = dense.substr(dense.find("PBQP"));
-  plain = plain.substr(0, plain.find('#'));
-  std::istringstream stream(plain);
-  std::string token, prefix;
-  while (stream >> token) {
-    if (token == "END")
-      break;
-    prefix += token + ' ';
-    pbqp_problem *partial = raw;
-    pbqp_error error;
-    check(read_text(prefix, &partial, &error) == PBQP_INVALID && !partial &&
-          error.line);
+  // Cover dense and sparse default/count/coordinate/value truncation paths.
+  const std::string sparse =
+      "PBQP 2 NODES 2 EDGES 1 MATRICES 1 NODE 0 2 0 0 NODE 1 2 0 0 "
+      "MATRIX 0 2 2 SPARSE INF 2 1 1 -0 0 0 0 EDGE 0 1 0 END";
+  for (auto plain : {dense.substr(dense.find("PBQP")), sparse}) {
+    plain = plain.substr(0, plain.find('#'));
+    std::istringstream stream(plain);
+    std::string token, prefix;
+    while (stream >> token) {
+      if (token == "END")
+        break;
+      prefix += token + ' ';
+      pbqp_problem *partial = raw;
+      pbqp_error error;
+      check(read_text(prefix, &partial, &error) == PBQP_INVALID && !partial &&
+            error.line);
+    }
   }
 
-  pbqp_cost_t unary[4] = {};
+  pbqp_cost_t unary[4] = {-0.0f, 0, 0, 0};
   const pbqp_node nodes[] = {{4, unary}, {4, unary}, {4, unary}};
   std::vector<pbqp_cost_t> finite(16, 1.25f), forbidden(16, PBQP_INF);
   finite.back() = -2;
@@ -703,6 +709,7 @@ void test_format2() {
   const pbqp_edge zero_edges[] = {{0, 1, positive.data()},
                                   {0, 2, negative.data()}};
   const pbqp_problem zeros{3, 2, nodes, zero_edges};
+  check_roundtrip(&zeros);
   check(pbqp_write(file.name().c_str(), &zeros, nullptr) == PBQP_OK);
   check(pbqp_read(file.name().c_str(), &raw, nullptr) == PBQP_OK);
   parsed.reset(raw);
@@ -750,6 +757,45 @@ void test_format2() {
         PBQP_OK);
   parsed.reset(raw);
   check_roundtrip(parsed.get());
+  // Count overflow is diagnosed before later header allocations, on its own
+  // line.
+  for (const auto &[field, count, line] :
+       {std::tuple{"NODES",
+                   std::numeric_limits<size_t>::max() / sizeof(pbqp_node) + 1,
+                   size_t{2}},
+        std::tuple{"EDGES",
+                   std::numeric_limits<size_t>::max() / sizeof(pbqp_edge) + 1,
+                   size_t{3}}}) {
+    const auto text =
+        std::string("PBQP 2\nNODES ") +
+        (std::string_view(field) == "NODES" ? std::to_string(count) : "0") +
+        "\nEDGES " +
+        (std::string_view(field) == "EDGES" ? std::to_string(count) : "0") +
+        "\nMATRICES 100000000000000000\n";
+    pbqp_error error;
+    check(read_text(text, &raw, &error) == PBQP_OVERFLOW && !raw &&
+          error.line == line);
+  }
+  // Unused sparse dimensions must never cause a cell-sized allocation.
+  check(read_text("PBQP 2 NODES 0 EDGES 0 MATRICES 1 "
+                  "MATRIX 0 60000 60000 SPARSE 0 0 END",
+                  &raw, nullptr) == PBQP_OK);
+  parsed.reset(raw);
+  check_roundtrip(parsed.get());
+  pbqp_error truncated;
+  check(read_text("PBQP 2 NODES 0 EDGES 0 MATRICES 1 "
+                  "MATRIX 0 60000 60000 SPARSE 0 3600000000",
+                  &raw, &truncated) == PBQP_INVALID &&
+        !raw);
+  check(read_text("PBQP 2 NODES 0 EDGES 0 MATRICES 1 "
+                  "MATRIX 0 60000 60000 DENSE",
+                  &raw, &truncated) == PBQP_INVALID &&
+        !raw);
+  // Validate unused definitions too, without expanding their defaults.
+  check(read_text("PBQP 2 NODES 0 EDGES 0 MATRICES 1 "
+                  "MATRIX 0 60000 60000 SPARSE 0 2 0 0 1 0 0 2 END",
+                  &raw, &truncated) == PBQP_INVALID &&
+        !raw);
   // Unused definitions are valid but are not represented by the public view.
   check(read_text("PBQP 2 NODES 0 EDGES 0 MATRICES 1 MATRIX 0 1 1 DENSE 0 END",
                   &raw, nullptr) == PBQP_OK);

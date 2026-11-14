@@ -59,6 +59,29 @@ jobs:
           clang-format-21 --version
           cmake --version
 
+      - name: Check out oneTBB for libc++
+        if: matrix.cxx_flags == '-stdlib=libc++'
+        uses: actions/checkout@v4
+        with:
+          repository: oneapi-src/oneTBB
+          ref: v2022.3.0
+          path: third-party/oneTBB
+
+      - name: Build oneTBB with libc++
+        if: matrix.cxx_flags == '-stdlib=libc++'
+        run: |
+          cmake -G Ninja -S third-party/oneTBB -B tbb-build \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-21 \
+            -DCMAKE_CXX_COMPILER=clang++-21 \
+            -DCMAKE_CXX_FLAGS=-stdlib=libc++ \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/tbb-libcxx" \
+            -DCMAKE_INSTALL_LIBDIR=lib -DTBB_TEST=OFF -DTBBMALLOC_BUILD=ON -DTBBMALLOC_PROXY_BUILD=OFF \
+            -DTBB_DISABLE_HWLOC_AUTOMATIC_SEARCH=ON -DTBB_STRICT=OFF -DTBB_ENABLE_IPO=OFF
+          cmake --build tbb-build --parallel 2
+          cmake --install tbb-build
+          echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/tbb-libcxx" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$RUNNER_TEMP/tbb-libcxx/lib" >> "$GITHUB_ENV"
+
       - name: Set up Ruby
         if: matrix.shared_libs == 'ON'
         uses: ruby/setup-ruby@v1
@@ -84,11 +107,28 @@ jobs:
           -DCMAKE_CXX_FLAGS="${{ matrix.sanitizer_flags }} ${{ matrix.cxx_flags }}"
 
       - name: Check formatting
-        if: matrix.build_type == 'Release'
+        if: matrix.docs == 'ON'
         run: cmake --build build --target check-format
 
       - name: Build
         run: cmake --build build --parallel 2
+
+      - name: Verify libc++ runtime isolation
+        if: matrix.cxx_flags == '-stdlib=libc++'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ldd build/test_parallel_exact | tee "$RUNNER_TEMP/pbqp-runtime.txt"
+          if grep -E 'libstdc\+\+|libsupc\+\+' "$RUNNER_TEMP/pbqp-runtime.txt"; then
+            echo 'Unexpected libstdc++ runtime in libc++ test process' >&2
+            exit 1
+          fi
+          grep -F 'libc++.so' "$RUNNER_TEMP/pbqp-runtime.txt"
+          LD_DEBUG=libs build/test_parallel_exact 2> "$RUNNER_TEMP/pbqp-loaded-runtime.txt"
+          if grep -E 'libstdc\+\+|libsupc\+\+' "$RUNNER_TEMP/pbqp-loaded-runtime.txt"; then
+            echo 'Unexpected runtime loaded dynamically during parallel search' >&2
+            exit 1
+          fi
 
       - name: Test
         env:

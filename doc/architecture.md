@@ -20,7 +20,8 @@ changing partition names or making private partitions available to clients.
 C entry points validate borrowed data, invoke the implementation, translate
 exceptions, and transfer independent output ownership. Text I/O entry points
 stay in `api/`; stream mechanics stay in `io/`. `problem_reader.cppm` handles
-both text versions and owns one dense array per PBQP 2 matrix definition;
+both text versions, retains compact sparse definitions, and materializes one
+dense array per referenced PBQP 2 matrix;
 `problem_writer.cppm` interns matrix views and selects dense/sparse encoding.
 The C boundary keeps file opening, validation, and exception translation. oneTBB headers and scheduler
 calls stay in `search/parallel.cpp` because some TBB helpers cannot be serialized
@@ -120,3 +121,9 @@ configures a private identity header from an explicit source list; formatting
 registers its template, not generated output. CLI provenance is appended as
 comments after END without extending the C problem struct or retaining comments
 inside library views.
+
+Generator provenance is published with the task by a same-directory staged
+rename. Its source identity reuses the component-owned production library and
+tool source aggregates, with normalized LF contents and paths relative to the
+checkout. Including the whole production library is conservative but prevents
+changes in the C I/O boundary or new partitions from escaping the identity.

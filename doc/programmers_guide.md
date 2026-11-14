@@ -1,6 +1,6 @@
 # Programmer's guide
 
-PBQP provides a stable [C API 2.0](c_api.md), a convenience
+PBQP provides a stable [C API 2.1](c_api.md), a convenience
 [C++ header](../include/pbqp.hpp), and small Python/Ruby bindings. The native
 implementation and module partitions remain private. Runnable programs live in
 [examples/programming](../examples/programming); problem data lives in
@@ -87,7 +87,7 @@ forbidden INF terms from feasible floating-point overflow.
 ## C++: RAII, vectors, spans, and exceptions
 
 Include `pbqp.hpp` and link `pbqp`. There is no public module import requirement.
-The wrapper is header-only and delegates all algorithms to C API 2.0.
+The wrapper is header-only and delegates all algorithms to C API 2.1.
 
 ```cpp
 const auto problem = pbqp::Problem::read("examples/pbqp/01_basic.pbqp");

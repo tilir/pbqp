@@ -1,0 +1,2 @@
+# Keep source checkouts and generator identities independent of autocrlf.
+* text=auto eol=lf

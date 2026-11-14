@@ -279,6 +279,27 @@ Generator tests pin integer rejection/full-width/zero-width draw consumption,
 subnormal/extreme/equal-bound float samples, and numeric fingerprints for all
 three families under direct and complement edge sampling. Run the same tests
 with libstdc++ and libc++; the Release libc++ CI configuration uses
-`-DCMAKE_CXX_FLAGS=-stdlib=libc++`. Both use the standard mt19937_64 engine.
+`-DCMAKE_CXX_FLAGS=-stdlib=libc++` and builds pinned oneTBB v2022.3.0 with the
+same runtime, including its dynamically loaded allocator, rather than linking
+apt's libstdc++ scheduler. `ldd` and a parallel run with `LD_DEBUG=libs` must
+show libc++ and no libstdc++/libsupc++ in the test process. Local verification can
+use an existing oneTBB checkout built with those flags and its installed
+`TBB_DIR`; no automatic local download is required. Both use the standard
+mt19937_64 engine.
 CLI tests compare task data independently of provenance, query --version, and
 replay a recorded command with spaces, quotes, and a newline in the output path.
+
+## PBQP 2 review regressions
+
+Unused 60000-by-60000 SPARSE definitions, including truncated and duplicate
+coordinate variants, must parse or fail without expanding the default. Header
+count overflow must win over later header allocations and retain its own source
+line. DENSE and SPARSE token prefixes exercise partial-object cleanup; generic
+round-trip comparisons compare float bits, including signed zero.
+
+`generator_atomic_output` injects a POSIX file-size limit that permits the task
+but rejects provenance, checking preservation of an old destination, absence of
+a newly published destination, and staging cleanup. CLI tests reject special
+output files without blocking, check a nonempty SHA-256 identity, and replay
+provenance. `generator_fingerprint` checks CRLF/LF, source edits, new source
+inputs, duplicate/order independence, and checkout-path independence.

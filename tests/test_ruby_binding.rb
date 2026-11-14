@@ -94,7 +94,7 @@ copy = nil
 check(frees == [3])
 
 library = PBQP::Library.new(ARGV[0])
-check(library.version == [2, 0, 0])
+check(library.version == [2, 1, 0])
 closed = nil
 solutions = library.read(ARGV[1]) do |problem|
   closed = problem

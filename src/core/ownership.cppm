@@ -22,8 +22,6 @@ struct ProblemStorage : pbqp_problem {
   std::vector<std::vector<pbqp_cost_t>> unary_costs;
   std::vector<std::vector<pbqp_cost_t>> pairwise_costs;
 
-  ProblemStorage(size_t n, size_t m) : ProblemStorage(n, m, m) {}
-
   ProblemStorage(size_t n, size_t m, size_t matrices)
       : pbqp_problem{}, node_records(n), edge_records(m), unary_costs(n),
         pairwise_costs(matrices) {

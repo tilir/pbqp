@@ -31,7 +31,9 @@ pbqp_configure_cxx_target(pbqp_cli PRIVATE)
 add_executable(pbqp_generate ${PBQP_GENERATE_SOURCES})
 target_link_libraries(pbqp_generate PRIVATE pbqp_generator pbqp_command_line)
 pbqp_configure_cxx_target(pbqp_generate PRIVATE)
-pbqp_generator_version(pbqp_generate)
+pbqp_generator_version(pbqp_generate "${CMAKE_CURRENT_SOURCE_DIR}/generator_version.hpp.in"
+  ${PBQP_LIBRARY_INPUTS} ${PBQP_COMMAND_LINE_MODULES} ${PBQP_GENERATOR_MODULES}
+  ${PBQP_GENERATOR_PARTITIONS} ${PBQP_GENERATOR_SOURCES} ${PBQP_GENERATE_SOURCES})
 
 pbqp_register_format_sources(${PBQP_COMMAND_LINE_MODULES} ${PBQP_GENERATOR_MODULES} ${PBQP_GENERATOR_PARTITIONS} ${PBQP_GENERATOR_SOURCES}
   ${PBQP_CLI_SOURCES} ${PBQP_GENERATE_SOURCES} generator_version.hpp.in)

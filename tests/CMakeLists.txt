@@ -68,3 +68,13 @@ add_test(NAME cli COMMAND "${CMAKE_COMMAND}"
   "-DHEURISTIC_EXAMPLE=${PROJECT_SOURCE_DIR}/examples/pbqp/07_parallel_exact_beats_heuristics.pbqp"
   "-DWORK=${PROJECT_BINARY_DIR}/cli-test"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/cli.cmake")
+
+find_package(Python3 3.10 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND AND UNIX)
+  add_test(NAME generator_atomic_output COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_generator_atomic.py" "$<TARGET_FILE:pbqp_generate>")
+endif()
+
+add_test(NAME generator_fingerprint COMMAND "${CMAKE_COMMAND}"
+  "-DSOURCE=${PROJECT_SOURCE_DIR}" "-DWORK=${PROJECT_BINARY_DIR}/fingerprint-test"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/generator_fingerprint.cmake")

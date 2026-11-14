@@ -74,17 +74,27 @@ encoding has default zero and one INF entry per register.
 ## Reproducibility and provenance
 
 `pbqp_generate --version` prints the project release plus a SHA-256 fingerprint
-of the generation, sampling, argument-handling, and serialization sources. The
+of the generation, sampling, argument-handling, and production library sources.
+Component-owned source lists supply these inputs, including the C I/O boundary;
+there is no second hand-maintained list of serializer dependencies. The
 fingerprint follows source edits, including uncommitted ones, through CMake's
 configure dependencies. It does not include the compiler, standard library,
-checkout path, build timestamp, or test-only sources. Matching fingerprints are
+checkout path, build timestamp, or test-only sources. CRLF is normalized to LF
+before hashing; `.gitattributes` also requests LF text checkouts. Matching fingerprints are
 conservative: even a comment-only source edit changes the identity.
+
+The CLI stages the task and its metadata together in an exclusively created
+sibling directory, closes both writes, then renames the completed file to the
+requested destination. Failure before publication preserves an existing output
+and removes staging data. This is atomic publication, not a crash-durability
+promise (`fsync` is not performed). Output must be a regular file or a new path;
+symlinks, directories, devices, and FIFOs are rejected rather than reopened.
 
 Every generated file ends with comments like:
 
 ```text
 END
-# generator: pbqp_generate 2.0.0+<source-fingerprint>
+# generator: pbqp_generate 2.1.0+<source-fingerprint>
 # random: mt19937_64; sampling protocol 1
 # command: ./build/pbqp_generate --mode=regalloc --nodes=10 --edges=30 --registers=4 --seed=42 --output=sample.pbqp
 ```

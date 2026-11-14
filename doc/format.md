@@ -79,7 +79,14 @@ The encoding has no register-allocation-specific semantics. Arbitrary coalescing
 costs, heterogeneous domains, and matrices with predominantly INF or nonzero
 entries use the same grammar. Each referenced matrix is materialized once as a
 dense array for the existing C API; parsed edges share its read-only storage.
-No archive codec or external decompression step is involved.
+SPARSE definitions retain only their default and explicit overrides until first
+reference; unused definitions are validated and discarded. Duplicate coordinates
+are checked by sorting the compact override vector, without one allocation per
+cell or a dimension-sized bitmap. DENSE values are buffered as tokens arrive;
+a truncated definition does not reserve the declared cell count up front.
+Referenced sparse matrices can still require large dense arrays: the C API does
+not expose sparse storage. No archive codec or external decompression step is
+involved.
 
 ## PBQP 1 compatibility
 
