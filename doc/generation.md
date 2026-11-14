@@ -2,7 +2,9 @@
 
 `pbqp_generate` writes a PBQP 1 instance with exactly the requested node and
 edge counts. All options accept `--name=value` or `--name value`. A fixed seed
-reproduces output with the same build and standard library.
+reproduces output with the same build and standard library. Unknown or mode-inapplicable option
+tokens warn and are ignored; `-Werror` makes them errors before writing output.
+Unknown tokens do not consume a following value; keep one attached with `=`.
 
 `--nodes`, `--edges`, `--seed`, and `--output` are required in every mode.
 `--mode=random` is the default. Use `--help` for the complete argument list.

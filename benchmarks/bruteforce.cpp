@@ -24,8 +24,13 @@ void binary20(benchmark::State &state) {
   const pbqp_cost_t costs[] = {1, 0};
   std::vector<pbqp_node> nodes(20, pbqp_node{2, costs});
   const pbqp_problem problem{nodes.size(), 0, nodes.data(), nullptr};
-  const pbqp_solve_options options{static_cast<size_t>(state.range(0)), nullptr,
-                                   nullptr, nullptr, nullptr};
+  pbqp_option options_entries[] = {
+      pbqp_size_option("num-threads", static_cast<size_t>(state.range(0))),
+      pbqp_progress_option("progress", nullptr),
+      pbqp_pointer_option("progress-data", nullptr),
+      pbqp_diagnostic_option("diagnostics", nullptr),
+      pbqp_pointer_option("diagnostic-data", nullptr)};
+  const pbqp_solve_options options{5, options_entries};
   pbqp_error error{};
   pbqp_solution *raw = nullptr;
   auto status = pbqp_solve_bruteforce(&problem, &options, &raw, &error);

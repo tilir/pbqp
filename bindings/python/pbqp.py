@@ -1,4 +1,4 @@
-"""Small ctypes binding for PBQP C API 1.0: file I/O, solving, and evaluation.
+"""Small ctypes binding for PBQP C API 2.0: file I/O, solving, and evaluation.
 
 SPDX-License-Identifier: GPL-3.0-only
 See LICENSE for the full license text.
@@ -10,12 +10,12 @@ from enum import IntEnum
 import os
 from pathlib import Path
 import weakref
+import warnings
 
 
 class Solver(IntEnum):
     NAIVE = 0
     BNB = 1
-    BNBOPT = 2
     GREEDY = 3
     R1R2RN = 4
 
@@ -69,14 +69,43 @@ _Progress = ct.CFUNCTYPE(None, ct.c_uint, ct.c_void_p)
 _Diagnostic = ct.CFUNCTYPE(None, ct.c_char_p, ct.c_void_p)
 
 
+class _OptionValue(ct.Union):
+    _fields_ = [("size", ct.c_size_t), ("boolean", ct.c_int),
+                ("string", ct.c_char_p), ("pointer", ct.c_void_p),
+                ("progress", _Progress), ("diagnostic", _Diagnostic)]
+
+
+class _Option(ct.Structure):
+    _fields_ = [("key", ct.c_char_p), ("type", ct.c_int),
+                ("value", _OptionValue)]
+
+
 class _Options(ct.Structure):
-    _fields_ = [
-        ("num_threads", ct.c_size_t),
-        ("progress", _Progress),
-        ("user_data", ct.c_void_p),
-        ("diagnostics", _Diagnostic),
-        ("diagnostic_data", ct.c_void_p),
-    ]
+    _fields_ = [("count", ct.c_size_t), ("entries", ct.POINTER(_Option))]
+
+
+def _option_map(num_threads, options, warning_callback):
+    # Keep every key/value byte string and the native array alive through solve.
+    entries = [_Option(b"num-threads", 0, _OptionValue(size=num_threads)),
+               _Option(b"warnings", 5, _OptionValue(diagnostic=warning_callback))]
+    for key, value in (options or {}).items():
+        if not isinstance(key, str) or not key or "\0" in key:
+            raise ValueError("option keys must be nonempty strings without NUL")
+        if isinstance(value, bool):
+            kind, payload = 1, _OptionValue(boolean=value)
+        elif isinstance(value, int):
+            if not 0 <= value <= ct.c_size_t(-1).value:
+                raise ValueError("integer option must fit in size_t")
+            kind, payload = 0, _OptionValue(size=value)
+        elif isinstance(value, str):
+            if "\0" in value:
+                raise ValueError("string option must not contain NUL")
+            kind, payload = 2, _OptionValue(string=value.encode())
+        else:
+            raise TypeError("option values must be bool, int, or str")
+        entries.append(_Option(key.encode(), kind, payload))
+    storage = (_Option * len(entries))(*entries)
+    return _Options(len(entries), storage)
 
 
 class _Evaluation(ct.Structure):
@@ -112,7 +141,7 @@ class Library:
         version = _Version()
         dll.pbqp_get_api_version(ct.byref(version))
         self.version = (version.major, version.minor, version.patch)
-        if version.major != 1:
+        if version.major != 2:
             raise RuntimeError(f"unsupported PBQP C API version: {self.version}")
         problem = ct.POINTER(_Problem)
         solution = ct.POINTER(_Solution)
@@ -183,17 +212,35 @@ class Problem:
             os.fsencode(path), self._require_open(), ct.byref(error)
         ), error)
 
-    def solve(self, solver=Solver.BNBOPT, *, num_threads=1):
+    def solve(self, solver=Solver.BNB, *, num_threads=1, options=None):
         if not isinstance(num_threads, int) or not 0 < num_threads <= 2**31 - 1:
             raise ValueError("num_threads must be positive and fit in int")
-        config = _Options(num_threads, _Progress(), None, _Diagnostic(), None)
+        messages = []
+        callback_failure = None
+
+        @_Diagnostic
+        def report_warning(message, _):
+            nonlocal callback_failure
+            try:
+                messages.append(message.decode("utf-8", errors="replace"))
+            except BaseException as failure:
+                callback_failure = failure
+
+        config = _option_map(num_threads, options, report_warning)
         pointer = ct.POINTER(_Solution)()
         error = _Error()
-        _check(self._library._dll.pbqp_solve(
+        status = self._library._dll.pbqp_solve(
             int(Solver(solver)), self._require_open(), ct.byref(config),
             ct.byref(pointer), ct.byref(error)
-        ), error)
+        )
         try:
+            if callback_failure is not None:
+                raise callback_failure
+            # Emit language-level warnings after C returns: warning filters may
+            # raise, and no Python exception may cross the foreign callback.
+            for message in messages:
+                warnings.warn(message, UserWarning, stacklevel=2)
+            _check(status, error)
             value = pointer.contents
             return Solution(value.cost, Quality(value.quality),
                             tuple(value.options[i] for i in range(value.num_nodes)))

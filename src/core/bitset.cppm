@@ -16,6 +16,7 @@ module;
 #include <concepts>
 #include <cstddef>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <type_traits>
 #include <vector>
@@ -57,7 +58,52 @@ public:
     trim();
   }
 
-  std::size_t size() const noexcept { return bits; }
+  // The range contains set-bit indices, not all bit positions. Its extent is
+  // named separately so ranges::size cannot mistake it for the element count.
+  std::size_t num_bits() const noexcept { return bits; }
+
+  class const_iterator {
+    const BitSet *owner = nullptr;
+    std::size_t position = 0;
+
+  public:
+    using value_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using reference = value_type;
+    using pointer = void;
+    using iterator_concept = std::forward_iterator_tag;
+    using iterator_category = std::forward_iterator_tag;
+
+    const_iterator() = default;
+
+    const_iterator(const BitSet &set, std::size_t bit) noexcept
+        : owner(&set), position(bit) {}
+
+    value_type operator*() const noexcept {
+      assert(owner && position < owner->num_bits());
+      return position;
+    }
+
+    const_iterator &operator++() noexcept {
+      assert(owner && position < owner->num_bits());
+      position = owner->next(position);
+      return *this;
+    }
+
+    const_iterator operator++(int) noexcept {
+      auto previous = *this;
+      ++*this;
+      return previous;
+    }
+
+    bool operator==(const const_iterator &) const noexcept = default;
+  };
+
+  using iterator = const_iterator;
+
+  const_iterator begin() const noexcept { return {*this, first()}; }
+
+  const_iterator end() const noexcept { return {*this, bits}; }
 
   std::size_t word_count() const noexcept { return words.size(); }
 

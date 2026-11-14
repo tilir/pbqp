@@ -13,8 +13,7 @@ changing partition names or making private partitions available to clients.
 | `src/io/` | Tokenization, parsing helpers, cost serialization |
 | `src/search/` | Prefix jobs, dispatch, percentage boundaries, covered-space accumulation |
 | `src/solvers/naive/` | Sequential and parallel exhaustive enumeration |
-| `src/solvers/bnb/` | Baseline bounds and shared exact B&B mechanics |
-| `src/solvers/bnbopt/` | Optimized bounds, verified regalloc structure, clique-first order, capacity relaxations, bounded auxiliary pricing |
+| `src/solvers/bnb/` | Unified B&B engine, reference-term bounds, optimization profiles, verified regalloc structure, capacity bounds, and pricing |
 | `src/solvers/greedy/` | Cost-priority assignment |
 | `src/solvers/reduction/` | Reduction graph, candidate worklist, propagation and reconstruction |
 
@@ -30,35 +29,51 @@ not depend on either heuristic. Shared mechanisms include prefix descriptors,
 dispatch, exact naive progress, and reference evaluation. B&B owns approximate
 surviving-tree progress, including cached child lookahead and donated subtree
 weights. Baseline and optimized B&B share identical worker/control semantics
-through a bounds-strategy template, with
-original-ID assignments and ordered search positions. Winner selection stays
+through a bounds-strategy template, with original-ID assignments and ordered
+search positions. The single C B&B boundary instantiates the same strategy for
+all profiles: its generic relaxation delegates to the reference bounds, while
+eligible enabled structural terms strengthen it. CLI names only choose the
+default profile. `bnb_options.cppm` owns the shared profile definitions;
+`api/solve_options.cppm` validates the open key-value map and `api/bnb_api.cppm`
+resolves profile/boolean settings before search preparation. Winner selection stays
 specific to the algorithm: naive preserves the first lexicographic minimum,
 while B&B shares an any-optimum incumbent.
 
-`BitSet<Word = unsigned>` owns reusable word-vector storage. Its unsigned word
+`BitSet<Word = unsigned>` owns reusable word-vector storage. Its const forward
+range yields ascending indices of set bits without allocation. `num_bits()`
+reports the domain extent and `count()` reports population; the range is unsized
+because population is not cached in constant time. Its unsigned word
 type is independent of bit count. Generic `IndependentSets` accepts adjacency
 bitsets and enumerates maximal sets directly; verified register structure and
-interpreting sets as register classes belong to `bnbopt`. A bounded all-subset reference lives only in private tests
+interpreting sets as register classes belong to the B&B structural path. A bounded all-subset reference lives only in private tests
 for differential checks and historical budget regressions. Pricing is also
 solver-specific and supplies integer constraints to the reference-order cost DP.
-`bnbopt_pricing.cppm` prepares shared root weights; `bnbopt_prefix_pricing.cppm`
+`bnb_pricing.cppm` prepares shared root weights; `bnb_prefix_pricing.cppm`
 uses preallocated worker-local scratch for conditioned refinements. The complete
-catalogue also feeds the bounded primal seed in `bnbopt_cover.cppm`, invoked by
+catalogue also feeds the bounded primal seed in `bnb_cover.cppm`, invoked by
 orchestration rather than by bounds or workers.
 
-## Shared B&B engine and baseline bounds
+## Unified B&B implementation
 
-`src/solvers/bnb` contains both the baseline bounds strategy (`bnb_bounds.cppm`)
-and the engine reused by `bnbopt`. `branch_and_bound.cppm` orchestrates root
-checks, heuristic seeding, planning, workers, and result ownership. The planner,
-queue, worker, and incumbent partitions operate on a supplied bounds strategy;
-they do not embed the optimized graph/capacity model. `src/solvers/bnbopt`
-provides that model. Generic prefix descriptors and TBB services remain in
-`src/search`, together with naive's exact progress counters. B&B's approximate
-progress reporter lives in `bnb_progress.cppm`. This split is intentional;
-another strategy may
-justify extracting the shared engine later, but a directory move is not required
-for baseline and optimized search to share it today.
+`src/solvers/bnb` owns the entire B&B implementation for O0/O1/O2.
+`bnb_bounds.cppm` defines `BranchAndBoundBounds`, composing the reference-term
+relaxation in `bnb_term_bounds.cppm` (`BranchAndBoundTermBounds`) with enabled
+structural bounds. Term minima, model checks, and generic matrix-based forward
+checking remain a cohesive helper rather than being mixed into capacity DPs.
+
+`branch_and_bound.cppm` orchestrates root checks, heuristic seeding, planning,
+workers, and result ownership. Its planner, queue, worker, and incumbent work
+with a supplied bounds strategy; private tests can exercise the term relaxation
+independently. The public B&B entry always uses the common composition and
+resolves its profile before preparation. `bnb_structure.cppm`,
+`bnb_pricing.cppm`, `bnb_prefix_pricing.cppm`, and `bnb_cover.cppm` provide optional
+structural components in the same directory, with reports in
+`bnb_diagnostics.cppm`. `bnbopt` is a CLI name selecting default profile O2,
+not a separate implementation subtree or C entry.
+
+Generic prefix descriptors and TBB services remain in `src/search`, together
+with naive's exact progress counters. B&B's approximate progress reporter lives
+in `bnb_progress.cppm`.
 
 B&B's work queue owns prepared prefix slots and selects cached lower bounds.
 Workers donate sibling ranges only between DFS chunks and remove those ranges
@@ -73,7 +88,7 @@ set on the `pbqp` target. Modules are compiled once, with no generated mirrors o
 exported implementation helpers. Test and benchmark sources are registered for
 formatting even when those targets are disabled.
 
-`tests/search_test_support.cpp` and `tests/bnbopt_test_support.cpp` are test-only
+`tests/search_test_support.cpp` and `tests/bnb_bounds_test_support.cpp` are test-only
 implementation units of `pbqp`, compiled in the owning library target when
 `BUILD_TESTING` is enabled. They import private partitions and check preparation
 invariants, prefix jobs, structural eligibility, and numerical lower bounds. A namespaced C++ linkage

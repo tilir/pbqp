@@ -18,7 +18,7 @@ module;
 #include <numeric>
 #include <random>
 #include <vector>
-module pbqp:bnbopt_cover;
+module pbqp:bnb_cover;
 import :independent_sets;
 import :bitset;
 import :ownership;
@@ -94,8 +94,7 @@ RegisterCoverSeed::RegisterCoverSeed(const pbqp_problem &input,
   for (const auto &pattern : sets) {
     masks[index] = &pattern;
     offsets[index++] = count;
-    for (size_t id = pattern.first(); id < pattern.size();
-         id = pattern.next(id))
+    for (size_t id : pattern)
       members[count++] = id;
   }
   offsets[index] = count;

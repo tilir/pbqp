@@ -3,7 +3,7 @@
 # See LICENSE for the full license text.
 
 cmake_minimum_required(VERSION 3.28)
-project(pbqp VERSION 1.0.0 LANGUAGES C CXX)
+project(pbqp VERSION 2.0.0 LANGUAGES C CXX)
 
 include(cmake/TargetOptions.cmake)
 include(cmake/Formatting.cmake)

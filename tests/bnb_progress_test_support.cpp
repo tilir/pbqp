@@ -26,7 +26,7 @@ import :bnb_progress;
 import :bnb_worker;
 import :bnb_work_queue;
 import :parallel;
-import :bnbopt_bounds;
+import :bnb_bounds;
 
 namespace {
 void check(bool condition,
@@ -234,15 +234,15 @@ void test_new_incumbent() {
   check(log.count == 100 && !log.invalid);
 }
 
-class CountingPriceBounds : public pbqp::OptimizedBranchAndBoundBounds {
+class CountingPriceBounds : public pbqp::BranchAndBoundBounds {
 public:
-  using pbqp::OptimizedBranchAndBoundBounds::OptimizedBranchAndBoundBounds;
+  using pbqp::BranchAndBoundBounds::BranchAndBoundBounds;
   mutable std::atomic<size_t> priced_checks{0};
 
   bool lower_bound(const size_t *tuple, size_t depth, Workspace &workspace,
                    pbqp_cost_t &cost) const noexcept {
-    const bool possible = pbqp::OptimizedBranchAndBoundBounds::lower_bound(
-        tuple, depth, workspace, cost);
+    const bool possible =
+        pbqp::BranchAndBoundBounds::lower_bound(tuple, depth, workspace, cost);
     if (workspace.prefix.available())
       ++priced_checks;
     return possible;

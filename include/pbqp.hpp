@@ -1,5 +1,5 @@
 /*
- * C++23 conveniences over C API 1.0: RAII problems, vector solutions, spans,
+ * C++23 conveniences over C API 2.0: RAII problems, vector solutions, spans,
  * typed solver selection, callbacks, and exceptions preserving C diagnostics.
  * This header does not expose implementation modules or solver internals.
  *
@@ -8,18 +8,20 @@
  */
 #pragma once
 /** @file pbqp.hpp
- * @brief Public C++23 wrapper over C API 1.0.
+ * @brief Public C++23 wrapper over C API 2.0.
  */
 #include "pbqp.h"
 #include <cstddef>
 #include <exception>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 /** Public C++ conveniences, independent of private implementation modules. */
@@ -31,9 +33,8 @@ using Cost = pbqp_cost_t;
 enum class Solver {
   Naive = PBQP_SOLVER_NAIVE,        ///< Exhaustive reference search.
   BranchAndBound = PBQP_SOLVER_BNB, ///< Exact B&B.
-  BranchAndBoundOptimized = PBQP_SOLVER_BNBOPT, ///< Exact optimized B&B.
-  Greedy = PBQP_SOLVER_GREEDY,                  ///< Greedy heuristic.
-  Reduction = PBQP_SOLVER_R1R2RN                ///< R1/R2/RN heuristic.
+  Greedy = PBQP_SOLVER_GREEDY,      ///< Greedy heuristic.
+  Reduction = PBQP_SOLVER_R1R2RN    ///< R1/R2/RN heuristic.
 };
 
 /** Feasibility or optimality guarantee, matching pbqp_solution_quality. */
@@ -62,6 +63,9 @@ public:
   std::size_t line() const noexcept { return source_line; }
 };
 
+/** Scalar values accepted by the open solver parameter map. */
+using OptionValue = std::variant<bool, std::size_t, std::string>;
+
 /** C++ callbacks are captured and safely bridged by solve(). */
 struct SolveOptions {
   std::size_t num_threads = 1; ///< Positive concurrency limit.
@@ -69,6 +73,10 @@ struct SolveOptions {
       progress; ///< Optional progress (approximate for B&B).
   std::function<void(std::string_view)>
       diagnostics; ///< Borrowed preparation text.
+  std::function<void(std::string_view)>
+      warnings; ///< Optional warnings; falls back to diagnostics when empty.
+  std::map<std::string, OptionValue>
+      parameters; ///< Additional key-value options.
 };
 
 /** Independent vector-backed assignment returned by solve(). */
@@ -118,7 +126,7 @@ inline Evaluation evaluate(const pbqp_problem &problem,
  * they do not cancel search. Diagnostic string_views are borrowed for a call.
  * One call's callbacks are serialized by the underlying C API. */
 inline Solution solve(const pbqp_problem &problem,
-                      Solver solver = Solver::BranchAndBoundOptimized,
+                      Solver solver = Solver::BranchAndBound,
                       const SolveOptions &options = {}) {
   struct Callbacks {
     const SolveOptions &options;
@@ -145,12 +153,41 @@ inline Solution solve(const pbqp_problem &problem,
         self.failure = std::current_exception();
       }
     }
+
+    static void warnings(const char *message, void *data) noexcept {
+      auto &self = *static_cast<Callbacks *>(data);
+      if (self.failure)
+        return;
+      try {
+        self.options.warnings(message);
+      } catch (...) {
+        self.failure = std::current_exception();
+      }
+    }
   } callbacks{options, {}};
 
-  const pbqp_solve_options config{
-      options.num_threads, options.progress ? Callbacks::progress : nullptr,
-      &callbacks, options.diagnostics ? Callbacks::diagnostics : nullptr,
-      &callbacks};
+  std::vector<pbqp_option> entries{
+      pbqp_size_option("num-threads", options.num_threads),
+      pbqp_progress_option("progress",
+                           options.progress ? Callbacks::progress : nullptr),
+      pbqp_pointer_option("progress-data", &callbacks),
+      pbqp_diagnostic_option("diagnostics", options.diagnostics
+                                                ? Callbacks::diagnostics
+                                                : nullptr),
+      pbqp_pointer_option("diagnostic-data", &callbacks),
+      pbqp_diagnostic_option("warnings",
+                             options.warnings ? Callbacks::warnings : nullptr),
+      pbqp_pointer_option("warning-data", &callbacks)};
+  for (const auto &[key, value] : options.parameters) {
+    if (auto item = std::get_if<bool>(&value))
+      entries.push_back(pbqp_bool_option(key.c_str(), *item));
+    else if (auto item = std::get_if<std::size_t>(&value))
+      entries.push_back(pbqp_size_option(key.c_str(), *item));
+    else
+      entries.push_back(pbqp_string_option(
+          key.c_str(), std::get<std::string>(value).c_str()));
+  }
+  const pbqp_solve_options config{entries.size(), entries.data()};
   pbqp_solution *raw = nullptr;
   pbqp_error error;
   const auto status = pbqp_solve(static_cast<pbqp_solver>(solver), &problem,
@@ -219,7 +256,7 @@ public:
   }
 
   /** Solves synchronously and returns an independent vector assignment. */
-  Solution solve(Solver solver = Solver::BranchAndBoundOptimized,
+  Solution solve(Solver solver = Solver::BranchAndBound,
                  const SolveOptions &options = {}) const {
     return pbqp::solve(view(), solver, options);
   }

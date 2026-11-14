@@ -28,7 +28,7 @@ import :problem;
 import :search_tasks;
 import :bnb_work_queue;
 import :bnb_worker;
-import :bnb_bounds;
+import :bnb_term_bounds;
 import :bnb_tasks;
 import :bnb_incumbent;
 import :search_progress;
@@ -108,9 +108,10 @@ void test_singleton_frontier() {
   });
   check(calls == 2 && closed.tasks.empty());
   check(closed.covered_depths == std::vector<size_t>{1024});
-  pbqp::BranchAndBoundBounds bounds(problem);
+  pbqp::BranchAndBoundTermBounds bounds(problem);
   pbqp::BranchAndBoundIncumbent incumbent(problem.num_nodes);
-  pbqp::PrefixPlanner<pbqp::BranchAndBoundBounds> planner(bounds, incumbent);
+  pbqp::PrefixPlanner<pbqp::BranchAndBoundTermBounds> planner(bounds,
+                                                              incumbent);
   auto bounded = planner.build(pbqp::BranchAndBoundSettings(4));
   check(!bounded.tasks.empty() && bounded.calls <= 512);
   if (bounded.calls > 1)
@@ -218,12 +219,13 @@ void test_runtime_donation() {
       edges.push_back({std::min(a, b), std::max(a, b), matrix});
     }
   pbqp_problem problem{nodes.size(), edges.size(), nodes.data(), edges.data()};
-  pbqp::BranchAndBoundBounds bounds(problem);
+  pbqp::BranchAndBoundTermBounds bounds(problem);
   pbqp::BranchAndBoundIncumbent incumbent(nodes.size());
   pbqp::AdaptivePlan plan;
   plan.tasks.push_back({});
   pbqp::CoarseWorkQueue queue(nodes.size(), 2, plan);
-  std::vector<pbqp::BranchAndBoundWorker<pbqp::BranchAndBoundBounds>> workers;
+  std::vector<pbqp::BranchAndBoundWorker<pbqp::BranchAndBoundTermBounds>>
+      workers;
   workers.reserve(2);
   for (size_t id = 0; id < 2; ++id)
     workers.emplace_back(bounds, incumbent);

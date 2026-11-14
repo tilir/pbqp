@@ -9,11 +9,13 @@ addition. Input validation and solution ownership rules are in `include/pbqp.h`.
 
 Each solver has one dedicated entry point with the signature
 `(problem, options, out, error)`. Pass NULL options for one thread without
-callbacks. `pbqp_solve_options` contains the thread limit, progress callback and
-its `user_data`, and diagnostic callback with its independent `diagnostic_data`.
-Progress callbacks are supported by exact solvers; heuristics reject them with
-`PBQP_INVALID` and always use one thread. A thread limit above one is valid for
-a heuristic but does not make it parallel.
+callbacks. `pbqp_solve_options` is an open typed map: common keys include
+`num-threads`, `progress`, `progress-data`, `diagnostics`, and `diagnostic-data`.
+The last entry for a key wins; each solver ignores keys it does not consume.
+Progress callbacks are supported by exact solvers. Heuristics warn and ignore
+progress callbacks and requested thread limits above one; they never call the
+ignored progress callback and always use one thread. Strict `warnings-as-errors`
+makes either request `PBQP_INVALID` before preparation and callbacks.
 
 `pbqp_solve(solver, problem, options, out, error)` dispatches by `pbqp_solver`:
 
@@ -21,7 +23,6 @@ a heuristic but does not make it parallel.
 | --- | --- | --- |
 | `PBQP_SOLVER_NAIVE` | `pbqp_solve_bruteforce` | OPTIMAL |
 | `PBQP_SOLVER_BNB` | `pbqp_solve_branch_and_bound` | OPTIMAL |
-| `PBQP_SOLVER_BNBOPT` | `pbqp_solve_branch_and_bound_optimized` | OPTIMAL |
 | `PBQP_SOLVER_GREEDY` | `pbqp_solve_greedy` | FEASIBLE |
 | `PBQP_SOLVER_R1R2RN` | `pbqp_solve_reduction` | FEASIBLE |
 
@@ -30,10 +31,14 @@ input and options, clear the output pointer on failure, and transfer ownership
 of an independent solution on success. For example:
 
 ```c
-pbqp_solve_options options = {4, NULL, NULL, NULL, NULL};
+const pbqp_option entries[] = {
+    pbqp_size_option("num-threads", 4),
+    pbqp_size_option("optimization-level", 2)
+};
+const pbqp_solve_options options = {2, entries};
 pbqp_solution *solution = NULL;
 pbqp_error error;
-pbqp_status status = pbqp_solve(PBQP_SOLVER_BNBOPT, problem, &options,
+pbqp_status status = pbqp_solve(PBQP_SOLVER_BNB, problem, &options,
                                &solution, &error);
 /* Inspect status before using solution. NULL is safe to free. */
 pbqp_solution_free(solution);
@@ -86,7 +91,7 @@ not the assignment. An older observed cost is a weaker bound and permits extra
 work. With any feasible incumbent G, a bound L >= G closes a subtree. A feasible
 incumbent whose accumulated cost is infinity is distinct from no incumbent.
 
-Nodes are assigned in ID order; options are visited by ascending unary cost,
+With the default O1 profile, nodes are assigned in ID order; options are visited by ascending unary cost,
 then option ID. For each prefix, forward checking removes unary-INF options
 and options forbidden by already assigned neighbors. Independent minima over
 the surviving options provide the bound's reference-order terms:
@@ -172,12 +177,12 @@ pbqp --solve=bnbopt --numthreads=4 --heartbeat \
   examples/pbqp/08_too_long_for_simple_bnb.pbqp
 ```
 
-`bnbopt` is a separate exact solver with the same C contracts, any-optimum tie
-policy, thread limit, and approximate search-tree heartbeat as `bnb`. The baseline retains
-its original ID order and independent-term bounds for comparison. Both strategies
-share the worker DFS, incumbent, prefix planner, TBB dispatcher, and progress
-mechanisms through one bounds-strategy template; naive's different winner
-semantics remain separate.
+`bnb` and `bnbopt` are CLI names for the same exact B&B engine, with default
+profiles O1 and O2. `-O0`, `-O1`, or `-O2` selects either profile through either
+name. Positive/negative `-f` flags override its defaults. See
+[profiles and overrides](bnbopts.md#optimization-profiles-and-overrides).
+All configurations share ownership, tie policy, worker DFS, incumbent, planner,
+TBB dispatch, and approximate heartbeat; naive's winner semantics remain separate.
 
 The optimized path requires actual verification of the uniform regalloc shape:
 all nodes have the same domain, every register unary is zero, spill rows and
@@ -274,8 +279,9 @@ conversion or allocation. Negative/INF spill costs retain valid unweighted and
 clique bounds. Cheap root/seed and structural proofs precede the extra work.
 No external LP library is required.
 
-The sole dedicated C entry point is `pbqp_solve_branch_and_bound_optimized`,
-accepting `pbqp_solve_options`, or NULL for defaults.
+The sole dedicated C entry point is `pbqp_solve_branch_and_bound`.
+Pass an `optimization-level` SIZE entry equal to 2 for the O2 defaults;
+NULL options select O1.
 Optional `BranchAndBoundOpt/Example06`, `/Example07`, `/Example08`, and `/Example09` Google
 Benchmark cases compare thread counts and heartbeat overhead. The [optimization guide](bnbopts.md) lists the additional assumptions, bounds,
 preparation budgets, and fallbacks, with reproducible benchmark commands.
@@ -285,13 +291,16 @@ refines auxiliary prices for the current prefix in private worker storage.
 Root weights remain available, and all pruning still uses integer capacities
 with reference-order float DP. See [sections 6 and 7 of the optimization
 guide](bnbopts.md#6-seed-from-independent-set-coverage) for eligibility, budgets,
-and the conditional dual. Baseline `bnb` does not use these structural paths.
+and the conditional dual. Profile O1 leaves these paths disabled unless explicitly enabled.
 
 ## Verbose diagnostics
 
 `--verbose` is a valueless flag for every solver. It writes the solver name,
 input dimensions, requested thread limit, heartbeat setting, and returned result
 quality to stderr. The normal COST/NODE records on stdout are unchanged.
+The `options:` prefix identifies optimization profiles, switches, and their
+configuration dependencies. The `search:` prefix identifies actual search
+parameters, planning, workers, and preliminary bounds.
 
 For `bnbopt`, it also reports cached eligibility and preparation decisions:
 input-shape mismatches with node/edge entries, graph and clique budgets,
@@ -314,8 +323,8 @@ The message precedes all DFS/progress callbacks and uses reference-order float
 costs, not the pricing stage's real-arithmetic objective or a time estimate.
 
 Library callers can request the same `bnbopt` messages through
-`pbqp_solve_branch_and_bound_optimized`, using the `diagnostics` and
-`diagnostic_data` fields of `pbqp_solve_options`. The synchronous C callback
+`pbqp_solve_branch_and_bound`, using the `diagnostics` and
+`diagnostic-data` keys of `pbqp_solve_options`. The synchronous C callback
 receives a borrowed NUL-terminated message without a newline, outside DFS. Diagnostic and progress contexts are independent; messages are not a
 stable machine-readable format. No diagnostic callback or terminal output is
 added when diagnostics are disabled.

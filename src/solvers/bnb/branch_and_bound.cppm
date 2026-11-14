@@ -15,7 +15,8 @@ module;
 #include <memory>
 #include <vector>
 module pbqp:branch_and_bound;
-import :bnb_bounds;
+import :bnb_term_bounds;
+import :bnb_options;
 import :bnb_incumbent;
 import :bnb_work_queue;
 import :bnb_worker;
@@ -26,7 +27,7 @@ import :error;
 import :evaluation;
 import :greedy;
 import :reduction;
-import :bnbopt_cover;
+import :bnb_cover;
 import :diagnostics;
 
 namespace pbqp {
@@ -57,13 +58,15 @@ void describe_preliminary_bounds(const AdaptivePlan &plan,
   }
 }
 
-template <typename Bounds = BranchAndBoundBounds> class BranchAndBoundSearch {
+template <typename Bounds = BranchAndBoundTermBounds>
+class BranchAndBoundSearch {
 public:
   struct SeedStatistics {
     bool greedy = false, reduction = false, cover = false;
   };
 
 private:
+  BnbOptions optimizations;
   Bounds bounds;
   BranchAndBoundIncumbent incumbent;
   size_t requested_threads, num_threads;
@@ -80,6 +83,7 @@ private:
 
   void seed_incumbent(pbqp_cost_t root_bound);
   void seed_cover(pbqp_cost_t root_bound);
+  bool prepare_capacity_bounds(pbqp_cost_t &lower);
   void prepare_plan();
 
   void finish(size_t index) {
@@ -98,7 +102,8 @@ private:
           finish(index);
           break;
         }
-        if (num_threads > 1)
+        if (num_threads > 1 &&
+            optimizations.enabled(BnbOptimization::WorkDonation))
           worker.share(*queue);
       }
     }
@@ -107,10 +112,14 @@ private:
 public:
   BranchAndBoundSearch(const pbqp_problem &p, size_t threads,
                        pbqp_progress_callback cb, void *data,
-                       Diagnostics log = {})
-      : bounds(p), incumbent(p.num_nodes), requested_threads(threads),
-        num_threads(parallel_concurrency(threads)), diagnostics(log),
-        settings(num_threads), callback(cb), user_data(data) {}
+                       Diagnostics log = {},
+                       BnbOptions options = Bounds::default_options())
+      : optimizations(options), bounds(p, options), incumbent(p.num_nodes),
+        requested_threads(threads), num_threads(parallel_concurrency(threads)),
+        diagnostics(log), settings(num_threads), callback(cb), user_data(data) {
+    if (!optimizations.enabled(BnbOptimization::PrefixPlanning))
+      settings.jobs = 1;
+  }
 
   const SeedStatistics &seed_statistics() const noexcept { return seeds; }
 
@@ -125,13 +134,16 @@ public:
 template <typename Bounds>
 void BranchAndBoundSearch<Bounds>::seed_incumbent(pbqp_cost_t root_bound) {
   const auto &problem = bounds.input();
-  seeds.greedy = true;
-  GreedySearch greedy(problem);
-  if (greedy.prepare(nullptr) == PBQP_OK && greedy.run(nullptr) == PBQP_OK) {
-    const auto &seed = greedy.get_solution();
-    incumbent.update(seed.options, seed.cost);
+  if (optimizations.enabled(BnbOptimization::GreedySeed)) {
+    seeds.greedy = true;
+    GreedySearch greedy(problem);
+    if (greedy.prepare(nullptr) == PBQP_OK && greedy.run(nullptr) == PBQP_OK) {
+      const auto &seed = greedy.get_solution();
+      incumbent.update(seed.options, seed.cost);
+    }
   }
-  if (!incumbent.can_improve(root_bound))
+  if (!incumbent.can_improve(root_bound) ||
+      !optimizations.enabled(BnbOptimization::ReductionSeed))
     return;
   seeds.reduction = true;
   ReductionSearch reduction(problem);
@@ -145,30 +157,64 @@ void BranchAndBoundSearch<Bounds>::seed_incumbent(pbqp_cost_t root_bound) {
 template <typename Bounds>
 void BranchAndBoundSearch<Bounds>::seed_cover(pbqp_cost_t root_bound) {
   if constexpr (requires { bounds.patterns(); }) {
-    if (!bounds.patterns().complete() || bounds.patterns().empty())
+    if (!optimizations.enabled(BnbOptimization::CoverSeed) ||
+        !bounds.patterns().complete() || bounds.patterns().empty())
       return;
     seeds.cover = true;
-    diagnostics.line("bnbopt: catalogue seed limits: restarts=",
+    diagnostics.line("bnb: catalogue seed limits: restarts=",
                      RegisterCoverSeed::restart_limit,
                      "; pattern-vertex work=", RegisterCoverSeed::work_budget,
                      "; pair candidates=", RegisterCoverSeed::pair_candidates);
     RegisterCoverSeed cover(bounds.input(), bounds.patterns());
     if (!cover.run(root_bound)) {
       if (!cover.enabled())
-        diagnostics.line("bnbopt: catalogue seed disabled: finite nonnegative "
+        diagnostics.line("bnb: catalogue seed disabled: finite nonnegative "
                          "spills required");
       else
-        diagnostics.line("bnbopt: catalogue seed unavailable: work budget "
+        diagnostics.line("bnb: catalogue seed unavailable: work budget "
                          "exhausted before a complete candidate");
       return;
     }
     const auto &seed = cover.solution();
     incumbent.update(seed.options, seed.cost);
-    diagnostics.line("bnbopt: catalogue seed: cost=", seed.cost,
+    diagnostics.line("bnb: catalogue seed: cost=", seed.cost,
                      "; restarts=", cover.restarts_used(),
                      "; pattern-vertex work=", cover.work_used(), "/",
                      RegisterCoverSeed::work_budget);
   }
+}
+
+template <typename Bounds>
+bool BranchAndBoundSearch<Bounds>::prepare_capacity_bounds(pbqp_cost_t &lower) {
+  if constexpr (requires { bounds.prepare_capacity(); }) {
+    if (!bounds.needs_capacity())
+      return false;
+    // Cheap structural bounds may already prove the heuristic seed optimal.
+    // Keep expensive complete-pattern enumeration and pricing behind that test.
+    typename Bounds::Workspace structural(bounds);
+    if (!bounds.lower_bound(nullptr, 0, structural, lower) ||
+        !incumbent.can_improve(lower)) {
+      diagnostics.line("search: structural bound closes root; capacity "
+                       "preparation unnecessary");
+      plan.covered_depths.push_back(0);
+      return true;
+    }
+    bounds.prepare_capacity(diagnostics);
+    typename Bounds::Workspace capacity(bounds);
+    if (!bounds.lower_bound(nullptr, 0, capacity, lower) ||
+        !incumbent.can_improve(lower)) {
+      diagnostics.line(
+          "search: capacity bound closes root; further seeds unnecessary");
+      plan.covered_depths.push_back(0);
+      return true;
+    }
+    seed_cover(lower);
+    if (!incumbent.can_improve(lower)) {
+      plan.covered_depths.push_back(0);
+      return true;
+    }
+  }
+  return false;
 }
 
 template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare_plan() {
@@ -199,32 +245,8 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare_plan() {
   bounds.prepare_search();
   if constexpr (requires { bounds.describe_structure(diagnostics); })
     bounds.describe_structure(diagnostics);
-  if constexpr (requires { bounds.prepare_capacity(); }) {
-    // Cheap structural bounds may already prove the heuristic seed optimal.
-    // Keep expensive complete-pattern enumeration and pricing behind that test.
-    typename Bounds::Workspace structural(bounds);
-    if (!bounds.lower_bound(nullptr, 0, structural, lower) ||
-        !incumbent.can_improve(lower)) {
-      diagnostics.line("search: structural bound closes root; capacity "
-                       "preparation unnecessary");
-      plan.covered_depths.push_back(0);
-      return;
-    }
-    bounds.prepare_capacity(diagnostics);
-    typename Bounds::Workspace capacity(bounds);
-    if (!bounds.lower_bound(nullptr, 0, capacity, lower) ||
-        !incumbent.can_improve(lower)) {
-      diagnostics.line(
-          "search: capacity bound closes root; further seeds unnecessary");
-      plan.covered_depths.push_back(0);
-      return;
-    }
-    seed_cover(lower);
-    if (!incumbent.can_improve(lower)) {
-      plan.covered_depths.push_back(0);
-      return;
-    }
-  }
+  if (prepare_capacity_bounds(lower))
+    return;
   PrefixPlanner<Bounds> planner(bounds, incumbent);
   plan = planner.build(settings);
   diagnostics.line("search: planned jobs=", plan.tasks.size(),

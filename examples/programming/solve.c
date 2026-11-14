@@ -13,7 +13,9 @@ int main(void) {
   const pbqp_node nodes[] = {{2, costs}, {2, costs}};
   const pbqp_edge edges[] = {{0, 1, matrix}};
   const pbqp_problem problem = {2, 1, nodes, edges};
-  const pbqp_solve_options options = {1, NULL, NULL, NULL, NULL};
+  const pbqp_option entries[] = {pbqp_size_option("num-threads", 1),
+                                 pbqp_size_option("optimization-level", 2)};
+  const pbqp_solve_options options = {2, entries};
   pbqp_solution *solution = NULL;
   pbqp_error error;
   pbqp_api_version version;

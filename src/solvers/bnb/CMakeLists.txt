@@ -1,10 +1,17 @@
-# Explicit PBQP solvers bnb implementation sources.
+# Unified branch-and-bound engine, term minima, and structural optimizations.
 # SPDX-License-Identifier: GPL-3.0-only
 # See LICENSE for the full license text.
 
 set(PBQP_COMPONENT_MODULES
   branch_and_bound.cppm
+  bnb_options.cppm
   bnb_bounds.cppm
+  bnb_term_bounds.cppm
+  bnb_cover.cppm
+  bnb_prefix_pricing.cppm
+  bnb_pricing.cppm
+  bnb_diagnostics.cppm
+  bnb_structure.cppm
   bnb_incumbent.cppm
   bnb_work_queue.cppm
   bnb_tasks.cppm

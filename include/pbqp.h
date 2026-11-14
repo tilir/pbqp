@@ -5,7 +5,7 @@
  * and edge matrix entries. Missing edges contribute zero; INF forbids a node
  * option or a pair. This header defines the in-memory format, min-plus
  * cost algebra, text I/O, ownership helpers, and exact/heuristic solvers.
- * C API version 1.0 is described in doc/c_api.md. The implementation uses
+ * C API version 2.0 is described in doc/c_api.md. The implementation uses
  * C++23; all public declarations are C-compatible. See doc/format.md for the
  * PBQP 1 text format.
  *
@@ -20,7 +20,7 @@
 #pragma once
 
 /** @file pbqp.h
- * @brief Stable C API 1.0 for PBQP data, file I/O, and solvers.
+ * @brief Stable C API 2.0 for PBQP data, file I/O, and solvers.
  */
 
 /** @mainpage PBQP API reference
@@ -29,7 +29,7 @@
  * vector results, span evaluation, typed options, and exceptions.
  *
  * The reference is generated from these public headers. Internal implementation
- * modules are not part of the public interface. API 1.x preserves existing
+ * modules are not part of the public interface. API 2.x preserves existing
  * signatures, numeric enum values, public layouts, and ownership contracts.
  */
 
@@ -41,11 +41,11 @@ extern "C" {
 #endif
 
 /** Compile-time C API version. These constants describe this header; query
- * pbqp_get_api_version when loading a library built separately. API 1.x
+ * pbqp_get_api_version when loading a library built separately. API 2.x
  * preserves existing signatures, numeric enum values, and public layouts.
  * The PBQP 1 file-format version is independent of the C API version. */
 enum {
-  PBQP_API_VERSION_MAJOR = 1, /**< Breaking compatibility version. */
+  PBQP_API_VERSION_MAJOR = 2, /**< Breaking compatibility version. */
   PBQP_API_VERSION_MINOR = 0, /**< Compatible API additions. */
   PBQP_API_VERSION_PATCH = 0  /**< Compatible fixes. */
 };
@@ -254,32 +254,149 @@ typedef void (*pbqp_progress_callback)(unsigned percent, void *user_data);
  */
 typedef void (*pbqp_diagnostic_callback)(const char *message, void *user_data);
 
-/** Initialize all fields, e.g. {1, NULL, NULL, NULL, NULL}. num_threads must be
- * positive and fit in int, the oneTBB arena's concurrency type. The limit
- * includes the calling thread. Task count or available TBB resources may reduce
- * concurrency. Options and callback contexts are borrowed only during the
- * synchronous call. progress/user_data and diagnostics/diagnostic_data are
- * independent pairs. NULL callbacks disable their respective notifications.
- * num_threads is an upper limit; greedy and reduction always use one thread.
- * A non-NULL progress callback is unsupported by heuristics and returns
- * PBQP_INVALID before preparation. All solvers support diagnostics.
- * NULL options select one thread without callbacks. */
+/** Runtime type of an option value. Read only the matching union member. */
+typedef enum pbqp_option_type {
+  PBQP_OPTION_SIZE = 0,      /**< A size_t integer. */
+  PBQP_OPTION_BOOL = 1,      /**< An int equal to zero or one. */
+  PBQP_OPTION_STRING = 2,    /**< A borrowed NUL-terminated string. */
+  PBQP_OPTION_POINTER = 3,   /**< A borrowed context pointer, possibly NULL. */
+  PBQP_OPTION_PROGRESS = 4,  /**< A progress callback, possibly NULL. */
+  PBQP_OPTION_DIAGNOSTIC = 5 /**< A diagnostic callback, possibly NULL. */
+} pbqp_option_type;
+
+/** Typed payload; its active member is determined by pbqp_option::type. */
+typedef union pbqp_option_value {
+  size_t size;                         /**< PBQP_OPTION_SIZE payload. */
+  int boolean;                         /**< PBQP_OPTION_BOOL payload. */
+  const char *string;                  /**< PBQP_OPTION_STRING payload. */
+  void *pointer;                       /**< PBQP_OPTION_POINTER payload. */
+  pbqp_progress_callback progress;     /**< PBQP_OPTION_PROGRESS payload. */
+  pbqp_diagnostic_callback diagnostic; /**< PBQP_OPTION_DIAGNOSTIC payload. */
+} pbqp_option_value;
+
+/** One named option. key is a borrowed nonempty NUL-terminated string. */
+typedef struct pbqp_option {
+  const char *key; /**< Case-sensitive key, without CLI prefixes. */
+  int type;        /**< A pbqp_option_type tag; checked for consumed keys. */
+  pbqp_option_value value; /**< Borrowed typed value. */
+} pbqp_option;
+
+/** Open key-value map borrowed for the synchronous call. NULL options and an
+ * empty map use defaults. Positive count requires a readable entries array of
+ * that length. Keys must be nonempty. The last entry for a key wins. Wrong tags
+ * or values for consumed keys return INVALID. Earlier values of repeated keys
+ * are ignored. Each solver skips keys it does not understand, reporting one
+ * warning per effective unknown key through the warning sink. Unknown
+ * tags/payloads are not inspected. By default unknown keys do not fail a call;
+ * warnings-as-errors makes them INVALID before search and progress callbacks.
+ * All keys, consumed string values, and callback contexts must remain alive and
+ * unchanged until the call returns.
+ *
+ * Common keys (all solvers):
+ * - "num-threads": SIZE, positive and int-representable, default 1. Includes
+ * the calling thread; actual concurrency may be smaller. Heuristics use one
+ * thread and warn when a larger limit is requested.
+ * - "progress": PROGRESS, default NULL. Heuristics warn and ignore non-NULL
+ *   callbacks; no progress notification is sent.
+ * - "progress-data": POINTER, default NULL.
+ * - "diagnostics": DIAGNOSTIC, default NULL, synchronous preparation messages.
+ * - "diagnostic-data": POINTER, default NULL, independent of progress-data.
+ * - "warnings": DIAGNOSTIC, optional warning callback. If NULL or omitted,
+ *   warnings use the diagnostics callback/context. With neither sink they are
+ *   not printed; library code never writes terminal output.
+ * - "warning-data": POINTER, default NULL, used with a non-NULL warnings sink.
+ * - "warnings-as-errors": BOOL, default false. Unknown or unsupported options
+ * return INVALID with a diagnostic, even without a sink; no
+ * warning/preparation/progress callbacks run on this strict unknown-option
+ * failure. Wrong consumed types and values remain errors independently of this
+ * flag. Warning callbacks have the same synchronous, calling-thread,
+ * borrowed-message contract as diagnostics.
+ *
+ * B&B keys:
+ * - "optimization-level": SIZE, 0/1/2, default 1. O0 keeps basic reference-term
+ *   B&B bounds. O1 enables all common search improvements; O2 adds structural
+ *   order, clique/cardinality/weighted bounds, repricing, and a coverage seed.
+ * - BOOL overrides: "option-order", "forward-checking", "register-symmetry",
+ *   "greedy-seed", "reduction-seed", "prefix-planning", "work-donation",
+ *   "structural-order", "clique-bounds", "cardinality-bounds",
+ *   "weighted-bounds", "repricing", "cover-seed". Overrides apply after the
+ *   profile, independent of map order. Repricing additionally requires weighted
+ *   bounds. Enabled optimizations still require eligible input and resources.
+ *
+ * No setting changes correctness, reference float evaluation, or result
+ * quality. Disabling forward checking retains mandatory fixed-assignment
+ * conflict checks. Callbacks must not throw or modify borrowed inputs or this
+ * map.
+ */
 typedef struct pbqp_solve_options {
-  size_t num_threads; /**< Positive concurrency upper limit, fitting in int. */
-  pbqp_progress_callback
-      progress;    /**< Optional exact-solver progress callback. */
-  void *user_data; /**< Borrowed progress context. */
-  pbqp_diagnostic_callback diagnostics; /**< Optional preparation messages. */
-  void *diagnostic_data; /**< Borrowed diagnostic context, separate from
-                            progress. */
+  size_t count; /**< Number of entries. */
+  const pbqp_option
+      *entries; /**< Borrowed array; ignored when count is zero. */
 } pbqp_solve_options;
+
+/** Constructs a size_t option with a borrowed key. */
+static inline pbqp_option pbqp_size_option(const char *key, size_t value) {
+  pbqp_option result;
+  result.key = key;
+  result.type = PBQP_OPTION_SIZE;
+  result.value.size = value;
+  return result;
+}
+
+/** Constructs a boolean option (zero or one) with a borrowed key. */
+static inline pbqp_option pbqp_bool_option(const char *key, int value) {
+  pbqp_option result;
+  result.key = key;
+  result.type = PBQP_OPTION_BOOL;
+  result.value.boolean = value;
+  return result;
+}
+
+/** Constructs an option containing a borrowed string; key and payload stay
+ * borrowed. */
+static inline pbqp_option pbqp_string_option(const char *key,
+                                             const char *value) {
+  pbqp_option result;
+  result.key = key;
+  result.type = PBQP_OPTION_STRING;
+  result.value.string = value;
+  return result;
+}
+
+/** Constructs an option containing a borrowed context; key and payload stay
+ * borrowed. */
+static inline pbqp_option pbqp_pointer_option(const char *key, void *value) {
+  pbqp_option result;
+  result.key = key;
+  result.type = PBQP_OPTION_POINTER;
+  result.value.pointer = value;
+  return result;
+}
+
+/** Constructs a progress callback option with a borrowed key. */
+static inline pbqp_option pbqp_progress_option(const char *key,
+                                               pbqp_progress_callback value) {
+  pbqp_option result;
+  result.key = key;
+  result.type = PBQP_OPTION_PROGRESS;
+  result.value.progress = value;
+  return result;
+}
+
+/** Constructs a diagnostic callback option with a borrowed key. */
+static inline pbqp_option
+pbqp_diagnostic_option(const char *key, pbqp_diagnostic_callback value) {
+  pbqp_option result;
+  result.key = key;
+  result.type = PBQP_OPTION_DIAGNOSTIC;
+  result.value.diagnostic = value;
+  return result;
+}
 
 /** Solver selection for the common dispatcher. */
 typedef enum pbqp_solver {
-  PBQP_SOLVER_NAIVE = 0, /**< Exhaustive lexicographic enumeration. */
-  PBQP_SOLVER_BNB = 1,   /**< Exact branch-and-bound. */
-  PBQP_SOLVER_BNBOPT =
-      2, /**< Exact B&B with eligible structural/capacity bounds. */
+  PBQP_SOLVER_NAIVE = 0,  /**< Exhaustive lexicographic enumeration. */
+  PBQP_SOLVER_BNB = 1,    /**< Exact branch-and-bound. */
   PBQP_SOLVER_GREEDY = 3, /**< Cost-priority assignment heuristic. */
   PBQP_SOLVER_R1R2RN = 4  /**< Reduction/backpropagation heuristic. */
 } pbqp_solver;
@@ -322,49 +439,31 @@ pbqp_status pbqp_solve_bruteforce(const pbqp_problem *problem,
 /** Exact branch-and-bound with the same validation, ownership, evaluation,
  * output, and diagnostic contracts as pbqp_solve_bruteforce. Returns any
  * optimum under reference-order float evaluation; tied assignments need not
- * match naive search and can depend on thread scheduling. Greedy and reduction
- * seed feasible incumbents. Bounds condition options on the fixed prefix and
- * sum independent term minima in reference order, without regrouping floats.
- * Prunes L >= G whenever a feasible incumbent exists. On PBQP_OK quality is
- * PBQP_SOLUTION_OPTIMAL; PBQP_INFEASIBLE requires an exhaustive proof.
- * NULL options select one thread without progress or diagnostics. Otherwise,
- * options control concurrency and optional progress/preparation callbacks.
- * Progress approximates the fraction of the surviving search tree. Immediate
- * infeasibility, symmetry, and bound cuts receive no child weight; remaining
- * children share their parent's weight. Initial frontier jobs have equal
- * weights; jobs closed on arrival are excluded. Subtrees can require unequal
- * work, so percentages can pause or advance abruptly and are not an ETA.
- * Notifications obey the serialized callback contract above. Success and
- * infeasibility proofs report 100; errors before search invoke no progress
- * callbacks. Diagnostics describe planning and worker preparation on the
- * calling thread, outside DFS.
- * Workspaces are private to workers; only immutable input/minima, a
- * synchronized incumbent, and progress reporting are shared. All work and
- * callbacks complete before return. Runtime/scheduler exceptions become
- * PBQP_INTERNAL_ERROR; allocation failures remain PBQP_NO_MEMORY. */
+ * match naive search and can depend on thread scheduling. The default O1
+ * profile uses greedy and reduction to seed feasible incumbents. O2 adds
+ * verified structural/capacity bounds and seeds; O0 disables optional search
+ * improvements. BOOL options override profile defaults. Bounds condition
+ * options on the fixed prefix and sum independent term minima in reference
+ * order, without regrouping floats. Prunes L >= G whenever a feasible incumbent
+ * exists. On PBQP_OK quality is PBQP_SOLUTION_OPTIMAL; PBQP_INFEASIBLE requires
+ * an exhaustive proof. NULL options select one thread without progress or
+ * diagnostics. Otherwise, options control concurrency and optional
+ * progress/preparation callbacks. Progress approximates the fraction of the
+ * surviving search tree. Immediate infeasibility, symmetry, and bound cuts
+ * receive no child weight; remaining children share their parent's weight.
+ * Initial frontier jobs have equal weights; jobs closed on arrival are
+ * excluded. Subtrees can require unequal work, so percentages can pause or
+ * advance abruptly and are not an ETA. Notifications obey the serialized
+ * callback contract above. Success and infeasibility proofs report 100; errors
+ * before search invoke no progress callbacks. Diagnostics describe planning and
+ * worker preparation on the calling thread, outside DFS. Workspaces are private
+ * to workers; only immutable input/minima, a synchronized incumbent, and
+ * progress reporting are shared. All work and callbacks complete before return.
+ * Runtime/scheduler exceptions become PBQP_INTERNAL_ERROR; allocation failures
+ * remain PBQP_NO_MEMORY. */
 pbqp_status pbqp_solve_branch_and_bound(const pbqp_problem *problem,
                                         const pbqp_solve_options *options,
                                         pbqp_solution **out, pbqp_error *error);
-
-/** Optimized exact B&B with the same validation, ownership, result quality,
- * reference-order evaluation, and diagnostic contracts as ordinary B&B.
- * Verified uniform regalloc inputs within preparation resource budgets use
- * structural clique-first traversal, dynamic-bitset forward checking, and
- * clique and global register-capacity bounds with bounded auxiliary pricing.
- * Unsupported inputs retain ordinary or unweighted bounds. Traversal
- * order never changes summation order. Returns any optimum; tied assignments
- * may depend on scheduling. No external mathematical-programming library is
- * required.
- * NULL options select one thread without progress or diagnostics. Otherwise,
- * options control concurrency, approximate search-tree progress, and optional
- * preparation diagnostics explaining input eligibility, enabled optimizations,
- * budgets, fallbacks, and worker/planning parameters. The progress and
- * diagnostic callback contracts above apply, with independent contexts. All
- * work and callbacks complete before return. */
-pbqp_status
-pbqp_solve_branch_and_bound_optimized(const pbqp_problem *problem,
-                                      const pbqp_solve_options *options,
-                                      pbqp_solution **out, pbqp_error *error);
 
 /** Validates and borrows inputs with the same ownership rules as brute force.
  * Visits nodes by descending (maximum - minimum) finite unary cost, breaking

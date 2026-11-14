@@ -1,10 +1,83 @@
-# Optimizations in bnbopt
+# Branch-and-bound optimizations
 
-`bnbopt` is an exact solver built on the same search engine as `bnb`. It retains
+`bnb` and `bnbopt` select default optimization profiles of one exact solver. It retains
 the C API contracts, any-optimum tie policy, thread limit, and approximate
 search-tree heartbeat. Both solvers report costs using unary terms in original node-ID
 order, followed by edge terms in stored order. Neither proves optimality for
 a regrouped real-arithmetic objective.
+
+## Optimization profiles and overrides
+
+Both CLI names use the same engine and C entry. `bnb` defaults to `-O1`;
+`bnbopt` defaults to `-O2`. Select a profile explicitly through either name:
+
+| Profile | Defaults |
+| --- | --- |
+| `-O0` | Basic B&B only: independent unary/pairwise term minima in reference order, node/option ID order, mandatory feasibility checks, and incumbent pruning. No heuristic seeds, symmetry cuts, forward checking, frontier planning, donation, or structural preparation. |
+| `-O1` | O0 plus option ordering, forward checking, verified register symmetry, greedy/reduction seeds, prefix planning, and work donation. This is the former baseline `bnb`. |
+| `-O2` | O1 plus structural order, clique/cardinality/weighted bounds, prefix repricing, and the independent-set coverage seed. This is the former `bnbopt`; new structural optimizations join this profile by default. |
+
+Every name in the table below supports both `-fNAME` and `-fno-NAME`. The last
+`-O` chooses the base profile; the last explicit form for each optimization
+overrides that base, independent of where the profile occurs in the command.
+Repeated named solver CLI options also use their last value. The generator's
+separate duplicate-rejection policy is unchanged. Unknown option tokens warn
+and are skipped; `-Werror` promotes these warnings to errors. Known options with
+invalid values still fail.
+
+| Optimization name | Default in | Effect when enabled |
+| --- | --- | --- |
+| `option-order` | O1/O2 | Visit each node's options by unary cost, then ID. |
+| `forward-checking` | O1/O2 | Filter unassigned domains against fixed neighbors. Mandatory fixed conflicts are checked even when disabled. |
+| `register-symmetry` | O1/O2 | Canonicalize interchangeable register names after verifying the input model. |
+| `greedy-seed` | O1/O2 | Try greedy before branching. |
+| `reduction-seed` | O1/O2 | Try R1/R2/RN if an incumbent improvement can still matter. |
+| `prefix-planning` | O1/O2 | Prepare a budgeted frontier rather than one root job. |
+| `work-donation` | O1/O2 | Donate unexplored sibling ranges to waiting workers between DFS chunks. |
+| `structural-order` | O2 | Branch in clique-first/adaptive structural order rather than node ID order. |
+| `clique-bounds` | O2 | Strengthen the lower bound with clique spill-count DPs. |
+| `cardinality-bounds` | O2 | Use global unweighted capacity from complete maximal independent sets. |
+| `weighted-bounds` | O2 | Prepare root prices and use auxiliary integer-weight capacities. |
+| `repricing` | O2 | Refine those weights for selected fixed prefixes. Requires `weighted-bounds`. |
+| `cover-seed` | O2 | Seed an incumbent by bounded independent-set coverage. |
+
+```sh
+# Equivalent baseline defaults through either CLI name.
+pbqp --solve=bnbopt -O1 INPUT
+pbqp --solve=bnb -O1 INPUT
+# Add individual structural bounds to the baseline.
+pbqp --solve=bnb -O1 -fweighted-bounds -frepricing INPUT
+# Keep O2 except prefix repricing.
+pbqp --solve=bnbopt -fno-repricing INPUT
+# Start at O0, but distribute the search across coarse initial jobs.
+pbqp --solve=bnb -O0 -fprefix-planning --numthreads=4 INPUT
+```
+
+O0 remains branch-and-bound, not naive tuple enumeration: safe reference-term
+bounds, feasibility checks, and incumbent pruning define the algorithm. They
+remain active in every profile. O0 disables both ways of distributing subtrees;
+requesting multiple threads alone cannot create parallel work. Re-enable
+planning or donation to make those threads useful.
+
+Disabled components skip their preparation when no other enabled consumer needs
+it. Clique discovery serves both clique bounds and structural order. The
+independent-set catalogue serves cardinality bounds, weighted bounds, and the
+coverage seed; it is not prepared when all three are disabled. Disabling weighted
+bounds also disables repricing, while disabling cardinality leaves weighted
+bounds available. Capacity constraints still test compatibility of register
+classes with fixed assignments even when forward domain filtering is disabled.
+
+Enabling a flag requests an optimization; it does not bypass model verification
+or resource limits. Unsupported data and exhausted budgets retain safe weaker
+bounds. `--verbose` reports the base profile, effective switches, and cached
+preparation/fallback decisions. All profiles preserve reference float semantics,
+exactness, ownership, and callback contracts.
+
+The C API uses `pbqp_solve_branch_and_bound` or the `PBQP_SOLVER_BNB` dispatcher
+selector for all profiles. The open map's SIZE key `optimization-level` selects
+0/1/2, default 1. BOOL keys use the names above without CLI prefixes. Last key
+wins, and overrides apply after the profile. See `include/pbqp.h` for the typed
+map contract and the [programmer's guide](programmers_guide.md) for examples.
 
 ## Applicability at a glance
 
@@ -486,8 +559,8 @@ catalogue; pricing-specific limits disable only the weighted path. See
 state limit, and fallback reason. Prefix diagnostics also report candidate
 storage, refresh work/iteration budgets, and the prepared state limit.
 
-The code map refers to [bnbopt_pricing.cppm](../src/solvers/bnbopt/bnbopt_pricing.cppm)
-and [bnbopt_bounds.cppm](../src/solvers/bnbopt/bnbopt_bounds.cppm).
+The code map refers to [bnb_pricing.cppm](../src/solvers/bnb/bnb_pricing.cppm)
+and [bnb_bounds.cppm](../src/solvers/bnb/bnb_bounds.cppm).
 
 | Implementation | Mathematical role |
 | --- | --- |
@@ -497,8 +570,8 @@ and [bnbopt_bounds.cppm](../src/solvers/bnbopt/bnbopt_bounds.cppm).
 | `PriceOptimizer::relax`, `run` | Step bound, temperature continuation, bounded stopping. |
 | `quantize_prices` | Checked conversion into nonnegative integer weights. |
 | `RegallocPricing::prepare` | Eligibility, work/state limits, and weight ownership. |
-| `OptimizedBranchAndBoundBounds::capacity_bound` | Prefix-conditioned integer register capacities and spill requirement. |
-| `OptimizedBranchAndBoundBounds::spill_bound` | Original-order float DP used for pruning. |
+| `BranchAndBoundBounds::capacity_bound` | Prefix-conditioned integer register capacities and spill requirement. |
+| `BranchAndBoundBounds::spill_bound` | Original-order float DP used for pruning. |
 
 The references explain the general mechanisms. The covering relaxation,
 capacity interpretation, budgets, quantization, and reference-order pruning
@@ -515,7 +588,7 @@ first selected set's register. Each register class is a subset of an independent
 set, so overlapping selected sets are harmless. Vertices outside the union spill.
 The catalogue is shared with both pricing paths; this creates no second catalogue.
 
-[RegisterCoverSeed](../src/solvers/bnbopt/bnbopt_cover.cppm) uses a deterministic
+[RegisterCoverSeed](../src/solvers/bnb/bnb_cover.cppm) uses a deterministic
 bounded search over this representation. It starts with maximum uncovered spill
 cost gains, tries perturbed-cost greedy restarts, and exchanges one or two
 register classes. Two-class exchanges consider the 16 largest marginal-gain
@@ -573,7 +646,7 @@ the sum of covariance Hessians has norm at most `R * alpha_U / T`; the safe
 heuristic step remains `T / (R * alpha_U)`. Warm starts use the root weights
 converted back to price units and projected into the original cost box.
 
-[PrefixPriceOptimizer](../src/solvers/bnbopt/bnbopt_prefix_pricing.cppm) performs
+[PrefixPriceOptimizer](../src/solvers/bnb/bnb_prefix_pricing.cppm) performs
 at most 64 iterations at each of the four root temperatures. After each stage,
 checked quantization writes a prepared integer buffer. The ordinary per-register
 integer capacities and original-order spill DP test those weights. **Neither
@@ -621,8 +694,8 @@ explicit distinction between no feasible incumbent and a feasible infinite-cost
 one; see [solver diagnostics](solvers.md#verbose-diagnostics). Independent-set
 preparation reports its result and work count or budget failure, rather than
 announcing a catalogue-kind choice or a pending preparation stage.
-Library callers set `diagnostics` and `diagnostic_data` in `pbqp_solve_options`
-passed to `pbqp_solve_branch_and_bound_optimized`;
+Library callers set the `diagnostics` and `diagnostic-data` keys in `pbqp_solve_options`
+passed to `pbqp_solve_branch_and_bound` with `optimization-level=2`;
 CLI formatting stays in the tool and diagnostic text never replaces stdout
 solution records.
 

@@ -14,10 +14,11 @@ module;
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <numeric>
 #include <span>
 #include <vector>
 
-module pbqp:bnbopt_structure;
+module pbqp:bnb_structure;
 import :bitset;
 
 namespace pbqp {
@@ -68,7 +69,7 @@ public:
 
   RegallocStructure(const RegallocStructure &) = delete;
   RegallocStructure &operator=(const RegallocStructure &) = delete;
-  void prepare();
+  void prepare(bool find_cliques = true, bool structural_order = true);
 
   size_t greedy_starts_used() const noexcept { return starts_used; }
 
@@ -108,8 +109,7 @@ public:
 double RegallocStructure::clique_weight(const BitSet<> &clique) const noexcept {
   // This score selects an order only. It is never used as a numerical bound.
   double weight = 0;
-  for (size_t node = clique.first(); node < clique.size();
-       node = clique.next(node))
+  for (size_t node : clique)
     weight += problem.nodes[node].costs[0];
   return weight;
 }
@@ -128,8 +128,7 @@ size_t RegallocStructure::clique_vertex(const BitSet<> &candidates) noexcept {
   assert(candidates.any());
   size_t best = candidates.first(), best_degree = 0;
   bool scored = false;
-  for (size_t node = best; node < candidates.size();
-       node = candidates.next(node)) {
+  for (size_t node : candidates) {
     if (remaining_work < candidates.word_count()) {
       remaining_work = 0;
       break;
@@ -206,8 +205,7 @@ void RegallocStructure::prepare_order() {
     order.push_back(node);
     chosen.set(node);
     remaining.reset(node);
-    for (size_t neighbor = adjacent[node].first(); neighbor < problem.num_nodes;
-         neighbor = adjacent[node].next(neighbor))
+    for (size_t neighbor : adjacent[node])
       ++connections[neighbor];
   };
   auto preferred = [&](size_t node, size_t best) {
@@ -231,8 +229,7 @@ void RegallocStructure::prepare_order() {
     }
     if (group && !adaptive_tail) {
       std::vector<size_t> tail;
-      for (size_t node = remaining.first(); node < remaining.size();
-           node = remaining.next(node))
+      for (size_t node : remaining)
         tail.push_back(node);
       std::sort(tail.begin(), tail.end(), preferred);
       for (size_t node : tail)
@@ -241,8 +238,7 @@ void RegallocStructure::prepare_order() {
     }
     while (remaining.any()) {
       size_t best = remaining.first();
-      for (size_t node = remaining.next(best); node < remaining.size();
-           node = remaining.next(node))
+      for (size_t node : remaining)
         if (preferred(node, best))
           best = node;
       append(best);
@@ -254,7 +250,7 @@ void RegallocStructure::prepare_order() {
   enumeration = {problem.num_nodes, 0, ordered_nodes.data(), nullptr};
 }
 
-void RegallocStructure::prepare() {
+void RegallocStructure::prepare(bool find_cliques, bool structural_order) {
   if (prepared || !supported)
     return;
   adjacent.assign(problem.num_nodes, BitSet<>(problem.num_nodes));
@@ -266,22 +262,30 @@ void RegallocStructure::prepare() {
     ++degrees[edge.src];
     ++degrees[edge.tgt];
   }
-  clique_sets.reserve(std::min(problem.num_nodes, greedy_starts) + 1);
-  greedy_cliques();
-  refine_clique();
-  clique_sets.push_back(best_clique);
-  std::sort(clique_sets.begin(), clique_sets.end());
-  clique_sets.erase(std::unique(clique_sets.begin(), clique_sets.end()),
-                    clique_sets.end());
-  std::sort(clique_sets.begin(), clique_sets.end(),
-            [&](const BitSet<> &a, const BitSet<> &b) {
-              return better_clique(a, b);
-            });
-  if (clique_sets.size() > max_cliques) {
-    omitted = clique_sets.size() - max_cliques;
-    clique_sets.resize(max_cliques);
+  if (find_cliques || structural_order) {
+    clique_sets.reserve(std::min(problem.num_nodes, greedy_starts) + 1);
+    greedy_cliques();
+    refine_clique();
+    clique_sets.push_back(best_clique);
+    std::sort(clique_sets.begin(), clique_sets.end());
+    clique_sets.erase(std::unique(clique_sets.begin(), clique_sets.end()),
+                      clique_sets.end());
+    std::sort(clique_sets.begin(), clique_sets.end(),
+              [&](const BitSet<> &a, const BitSet<> &b) {
+                return better_clique(a, b);
+              });
+    if (clique_sets.size() > max_cliques) {
+      omitted = clique_sets.size() - max_cliques;
+      clique_sets.resize(max_cliques);
+    }
   }
-  prepare_order();
+  if (structural_order) {
+    prepare_order();
+  } else {
+    order.resize(problem.num_nodes);
+    std::iota(order.begin(), order.end(), size_t{0});
+    enumeration = problem;
+  }
   prepared = true;
 }
 } // namespace pbqp

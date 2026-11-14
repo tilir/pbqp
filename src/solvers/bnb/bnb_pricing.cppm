@@ -26,7 +26,7 @@ module;
 #include <limits>
 #include <utility>
 #include <vector>
-module pbqp:bnbopt_pricing;
+module pbqp:bnb_pricing;
 import :independent_sets;
 
 namespace pbqp {
@@ -79,8 +79,7 @@ double PriceOptimizer::score_patterns(const std::vector<double> &values) {
   size_t k = 0;
   for (const auto &pattern : sets) {
     double score = 0;
-    for (size_t id = pattern.first(); id < pattern.size();
-         id = pattern.next(id))
+    for (size_t id : pattern)
       score += values[id];
     scores[k++] = score;
     maximum = std::max(maximum, score);
@@ -101,8 +100,7 @@ void PriceOptimizer::prepare_gradient(double temperature) {
   size_t k = 0;
   for (const auto &pattern : sets) {
     double contribution = registers * probabilities[k++] / sum;
-    for (size_t id = pattern.first(); id < pattern.size();
-         id = pattern.next(id))
+    for (size_t id : pattern)
       gradient[id] -= contribution;
   }
 }

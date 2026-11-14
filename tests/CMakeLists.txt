@@ -8,12 +8,12 @@ set(PBQP_REDUCTION_TEST_SOURCES test_reduction.cpp)
 set(PBQP_C_API_TEST_SOURCES test_c_api.c)
 set(PBQP_CPP_API_TEST_SOURCES test_cpp_api.cpp)
 set(PBQP_INTERNAL_TEST_SOURCES test_search_internals.cpp)
-set(PBQP_INTERNAL_TEST_SUPPORT search_test_support.cpp bnbopt_test_support.cpp
+set(PBQP_INTERNAL_TEST_SUPPORT search_test_support.cpp bnb_bounds_test_support.cpp
   bnb_progress_test_support.cpp)
 pbqp_register_format_sources(${PBQP_TEST_SOURCES} ${PBQP_REDUCTION_TEST_SOURCES}
   ${PBQP_C_API_TEST_SOURCES} ${PBQP_CPP_API_TEST_SOURCES}
   ${PBQP_PARALLEL_TEST_SOURCES}
-  ${PBQP_INTERNAL_TEST_SOURCES} ${PBQP_INTERNAL_TEST_SUPPORT})
+  ${PBQP_INTERNAL_TEST_SOURCES} ${PBQP_INTERNAL_TEST_SUPPORT} solver_profiles.hpp)
 set(PBQP_FORMAT_SOURCES "${PBQP_FORMAT_SOURCES}" PARENT_SCOPE)
 
 if(NOT BUILD_TESTING)

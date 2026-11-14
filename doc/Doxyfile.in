@@ -4,7 +4,7 @@
 
 PROJECT_NAME           = "PBQP API"
 PROJECT_NUMBER         = "@PROJECT_VERSION@"
-PROJECT_BRIEF          = "C API 1.0 and C++23 conveniences"
+PROJECT_BRIEF          = "C API 2.0 and C++23 conveniences"
 OUTPUT_DIRECTORY       = "@PROJECT_BINARY_DIR@/docs"
 INPUT                  = "@PROJECT_SOURCE_DIR@/include/pbqp.h" \
                          "@PROJECT_SOURCE_DIR@/include/pbqp.hpp"

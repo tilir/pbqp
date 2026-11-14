@@ -233,3 +233,34 @@ and exercise the 66th register on a 70-node graph. A complete 1025-pair catalogu
 exceeds the register-pattern candidate budget while retaining an independently
 certified root capacity. Seed tests cover fractional, signed, explicit-INF,
 and reachable overflowed costs without changing input arrays.
+
+
+## Optimization profiles and the open option map
+
+The public recursive oracle compares O0/O1/O2, each individual positive/negative
+optimization override, and mixed switch sets on small generated problems.
+Private conditioned-bound tests also disable symmetry, forward checking,
+structural order, and clique bounds together, checking every noncanonical prefix
+against independent original-order completions. A sparse high-register prefix
+covers arbitrary register IDs when symmetry is off.
+
+C checks cover tagged map layout/linkage, defaults, empty maps, missing entries,
+invalid keys/tags, wrong consumed types, invalid profiles/booleans, unknown keys,
+last-entry precedence, and independent callback contexts. CLI cases cover both
+names under all profiles, equivalent O0 output, positive and negative overrides,
+last-flag/profile precedence, dependencies, and unsupported options. C++/Python/
+Ruby wrappers exercise open scalar maps and reject invalid profiles/types while
+retaining ownership and callback behavior.
+
+
+Unknown-option regressions cover warning callbacks and independent contexts,
+diagnostic fallback, warning delivery without verbose CLI output, last-key
+precedence, per-solver recognition, and strict failures with no callbacks/search.
+Both CLI tools exercise `-Werror` in either argument order and unchanged outputs.
+Bindings cover native strict mode and language warning emission after returning
+from C, including cleanup when Python warning filters raise.
+
+Bitset range checks use independent boolean-vector indices across all supported
+word widths, empty/full/random sets, padding, and empty intervening words. Check
+const/common/forward iterator concepts, unsized range semantics, postfix
+increment, multipass copies, and standard range/iterator algorithms.

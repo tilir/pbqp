@@ -1,6 +1,6 @@
 # Programmer's guide
 
-PBQP provides a stable [C API 1.0](c_api.md), a convenience
+PBQP provides a stable [C API 2.0](c_api.md), a convenience
 [C++ header](../include/pbqp.hpp), and small Python/Ruby bindings. The native
 implementation and module partitions remain private. Runnable programs live in
 [examples/programming](../examples/programming); problem data lives in
@@ -46,7 +46,12 @@ option 1 costs zero, but the edge forbids choosing option 1 at both endpoints,
 so the optimum costs one.
 
 ```c
-pbqp_solve_options options = {1, NULL, NULL, NULL, NULL};
+const pbqp_option entries[] = {
+    pbqp_size_option("num-threads", 1),
+    pbqp_size_option("optimization-level", 2),
+    pbqp_bool_option("repricing", 1)
+};
+const pbqp_solve_options options = {3, entries};
 pbqp_solution *solution = NULL;
 pbqp_error error;
 pbqp_status status = pbqp_solve(PBQP_SOLVER_BNB, &problem, &options,
@@ -63,6 +68,16 @@ Solvers validate automatically, borrow inputs only during the call, and return
 independent solution storage. Pass NULL options for the defaults. The dedicated
 solver functions use the same options/output contract as the dispatcher.
 
+The map is open: unknown keys are skipped with a warning by solvers that do not
+consume them. Install a `warnings` callback and `warning-data` context, or use
+the diagnostic sink as fallback. With no sink the C library stays silent.
+The BOOL option `warnings-as-errors=true` makes unknown keys INVALID before
+preparation/search, even without a sink.
+Repeated keys use the last entry. Consumed keys must have the documented tag and
+value. Keep entries, keys, strings, and callback contexts alive through the call.
+All B&B profiles use `PBQP_SOLVER_BNB`; `optimization-level` defaults to 1.
+See the generated header reference for common keys and supported B&B overrides.
+
 Check execution status before reading a solution. FEASIBLE means an allowed
 assignment, not a proof of optimality. NO_SOLUTION from a heuristic does not
 prove infeasibility. Inspect `pbqp_error` on failure; it needs no initialization.
@@ -72,14 +87,16 @@ forbidden INF terms from feasible floating-point overflow.
 ## C++: RAII, vectors, spans, and exceptions
 
 Include `pbqp.hpp` and link `pbqp`. There is no public module import requirement.
-The wrapper is header-only and delegates all algorithms to C API 1.0.
+The wrapper is header-only and delegates all algorithms to C API 2.0.
 
 ```cpp
 const auto problem = pbqp::Problem::read("examples/pbqp/01_basic.pbqp");
 pbqp::SolveOptions options;
 options.num_threads = 4;
+options.parameters["optimization-level"] = std::size_t{2};
+options.parameters["weighted-bounds"] = true;
 options.progress = [](unsigned percent) { /* Update application progress. */ };
-const auto solution = problem.solve(pbqp::Solver::BranchAndBoundOptimized,
+const auto solution = problem.solve(pbqp::Solver::BranchAndBound,
                                     options);
 const auto evaluation = problem.evaluate(solution.options);
 ```
@@ -90,6 +107,9 @@ a moved-from object's `view()` throws `std::logic_error`. `write(path)` serializ
 it. A `Solution` owns a `std::vector<std::size_t>` and remains valid after the
 problem is destroyed; it exposes `cost`, `quality`, and `options`.
 `Quality::Feasible` and `Quality::Optimal` preserve the C quality distinction.
+`SolveOptions::parameters` is an open map of bool, size_t, and string values.
+These entries follow the typed convenience fields, so matching keys override
+those defaults. Callback functions remain managed by the wrapper.
 
 For application-owned C views backed by arrays or vectors, use the free
 functions `pbqp::validate(view)`, `pbqp::write(path, view)`,
@@ -108,7 +128,7 @@ vector ownership after problem destruction, diagnostics, and error handling.
 Exceptions from either callback are captured, further callbacks suppressed,
 and the exception rethrown after the native solve returns. This does not cancel
 search and never lets an exception cross the C callback boundary. Heuristics
-reject progress callbacks, just as the C API does.
+warn and ignore progress callbacks, or fail in native strict mode.
 
 The stable binary boundary is the C API. The C++ wrapper must be recompiled
 with the consuming compiler/standard library; it does not promise a cross-toolchain
@@ -137,7 +157,8 @@ from pbqp import Library, Solver
 
 library = Library("build-shared/libpbqp.so")
 with library.read("examples/pbqp/01_basic.pbqp") as problem:
-    solution = problem.solve(Solver.BNBOPT, num_threads=4)
+    solution = problem.solve(Solver.BNB, num_threads=4,
+                             options={"optimization-level": 2, "repricing": True})
     evaluation = problem.evaluate(solution.options)
     problem.write("build-shared/copy.pbqp")
 print(solution.cost, solution.quality, solution.options)
@@ -171,7 +192,8 @@ require 'pbqp'
 
 library = PBQP::Library.new('build-shared/libpbqp.so')
 solution = library.read('examples/pbqp/01_basic.pbqp') do |problem|
-  result = problem.solve(PBQP::Solver::BNBOPT, num_threads: 4)
+  result = problem.solve(PBQP::Solver::BNB, num_threads: 4,
+                         options: { 'optimization-level' => 2, 'repricing' => true })
   evaluation = problem.evaluate(result.options)
   problem.write('build-shared/copy.pbqp')
   result
@@ -208,3 +230,26 @@ is serialized covered-space accounting, not wall time or an ETA. Borrowed input
 must remain unchanged, and outputs/errors need separate storage for concurrent
 calls. For the complete numeric, ownership, version, and diagnostic contracts,
 consult the [C API reference](c_api.md) and the public header.
+
+## Unknown options and warnings
+
+Both command-line tools warn about unknown or inapplicable options on stderr and continue,
+independently of `--verbose`. Use `-Werror` to fail before solving or generating:
+
+```sh
+pbqp --solve=bnb -fno-typo INPUT
+pbqp --solve=bnb -Werror -fno-typo INPUT
+```
+
+Unknown tokens do not consume the next argument; use `--name=value` to keep an
+unknown value attached to its option. Malformed known options and invalid values for applicable options
+remain errors. The C++ wrapper has a separate `warnings` callback, with diagnostic fallback.
+Python emits `UserWarning`; Ruby uses `warn`. Both emit language-level warnings
+only after returning from C and release any native solution if warning handling
+raises. Their open scalar maps accept `warnings-as-errors` for native strict mode.
+
+For example, `pbqp --solve=greedy --heartbeat INPUT` warns and solves without
+progress; adding `-Werror` fails before search. Requested heuristic concurrency
+above one also warns and falls back to one thread. B&B switches passed to other
+algorithms warn as unrecognized solver keys. Mode-inapplicable generator options
+warn and are ignored rather than changing the selected generation family.

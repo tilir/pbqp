@@ -10,6 +10,7 @@
  * See LICENSE for the full license text.
  */
 #include "pbqp.h"
+#include "solver_profiles.hpp"
 #include <atomic>
 #include <exception>
 #include <iostream>
@@ -65,11 +66,16 @@ void verify(const pbqp_problem &problem, size_t threads, bool naive = false,
   auto expected = pbqp_solve_bruteforce(&problem, nullptr, &raw, nullptr);
   SolutionPtr exact(raw);
   Progress progress;
-  const pbqp_solve_options options{threads, report, &progress, nullptr,
-                                   nullptr};
+  pbqp_option options_entries[] = {
+      pbqp_size_option("num-threads", threads),
+      pbqp_progress_option("progress", report),
+      pbqp_pointer_option("progress-data", &progress),
+      pbqp_diagnostic_option("diagnostics", nullptr),
+      pbqp_pointer_option("diagnostic-data", nullptr)};
+  const pbqp_solve_options options{5, options_entries};
   pbqp_error error{42, "old error"};
   auto solve = naive ? pbqp_solve_bruteforce
-                     : (optimized ? pbqp_solve_branch_and_bound_optimized
+                     : (optimized ? pbqp_test::solve_profile<2>
                                   : pbqp_solve_branch_and_bound);
   auto status = solve(&problem, &options, &raw, &error);
   SolutionPtr solution(raw);
@@ -190,7 +196,13 @@ void test_large_progress() {
     std::vector<pbqp_node> nodes(65, pbqp_node{2, costs});
     pbqp_problem problem{nodes.size(), 0, nodes.data(), nullptr};
     Progress progress;
-    const pbqp_solve_options options{4, report, &progress, nullptr, nullptr};
+    pbqp_option options_entries[] = {
+        pbqp_size_option("num-threads", 4),
+        pbqp_progress_option("progress", report),
+        pbqp_pointer_option("progress-data", &progress),
+        pbqp_diagnostic_option("diagnostics", nullptr),
+        pbqp_pointer_option("diagnostic-data", nullptr)};
+    const pbqp_solve_options options{5, options_entries};
     pbqp_solution *raw = nullptr;
     auto status =
         pbqp_solve_branch_and_bound(&problem, &options, &raw, nullptr);
@@ -210,7 +222,13 @@ void test_large_progress() {
   pbqp_edge edges[] = {{62, 63, equal}, {62, 64, unequal}, {63, 64, equal}};
   pbqp_problem problem{nodes.size(), 3, nodes.data(), edges};
   Progress progress;
-  const pbqp_solve_options options{4, report, &progress, nullptr, nullptr};
+  pbqp_option options_entries[] = {
+      pbqp_size_option("num-threads", 4),
+      pbqp_progress_option("progress", report),
+      pbqp_pointer_option("progress-data", &progress),
+      pbqp_diagnostic_option("diagnostics", nullptr),
+      pbqp_pointer_option("diagnostic-data", nullptr)};
+  const pbqp_solve_options options{5, options_entries};
   pbqp_solution *raw = nullptr;
   check(pbqp_solve_branch_and_bound(&problem, &options, &raw, nullptr) ==
         PBQP_OK);
@@ -314,11 +332,16 @@ void test_optimized_regalloc() {
                           cycle_edges.data()};
   Progress progress;
   std::string diagnostics;
-  pbqp_solve_options configuration{4, report, &progress, record_diagnostic,
-                                   &diagnostics};
+  pbqp_option configuration_entries[] = {
+      pbqp_size_option("num-threads", 4),
+      pbqp_progress_option("progress", report),
+      pbqp_pointer_option("progress-data", &progress),
+      pbqp_diagnostic_option("diagnostics", record_diagnostic),
+      pbqp_pointer_option("diagnostic-data", &diagnostics)};
+  pbqp_solve_options configuration{5, configuration_entries};
   pbqp_solution *raw = nullptr;
-  check(pbqp_solve_branch_and_bound_optimized(&odd_cycles, &configuration, &raw,
-                                              nullptr) == PBQP_OK);
+  check(pbqp_test::solve_profile<2>(&odd_cycles, &configuration, &raw,
+                                    nullptr) == PBQP_OK);
   check(diagnostics.find("independent sets complete: count=625") !=
         std::string::npos);
   check(diagnostics.find("structural path enabled") != std::string::npos);
@@ -335,18 +358,28 @@ void test_optimized_regalloc() {
 void test_contract() {
   pbqp_problem empty{};
   pbqp_solution *raw = nullptr;
-  const pbqp_solve_options options{4, nullptr, nullptr, nullptr, nullptr};
-  for (auto solve :
-       {pbqp_solve_branch_and_bound, pbqp_solve_branch_and_bound_optimized,
-        pbqp_solve_bruteforce}) {
+  pbqp_option options_entries[] = {
+      pbqp_size_option("num-threads", 4),
+      pbqp_progress_option("progress", nullptr),
+      pbqp_pointer_option("progress-data", nullptr),
+      pbqp_diagnostic_option("diagnostics", nullptr),
+      pbqp_pointer_option("diagnostic-data", nullptr)};
+  const pbqp_solve_options options{5, options_entries};
+  for (auto solve : {pbqp_solve_branch_and_bound, pbqp_test::solve_profile<2>,
+                     pbqp_solve_bruteforce}) {
     check(solve(&empty, nullptr, &raw, nullptr) == PBQP_OK);
     SolutionPtr solution(raw);
     for (size_t threads :
          {size_t{0},
           static_cast<size_t>(std::numeric_limits<int>::max()) + 1}) {
       Progress progress;
-      const pbqp_solve_options invalid{threads, report, &progress, nullptr,
-                                       nullptr};
+      pbqp_option invalid_entries[] = {
+          pbqp_size_option("num-threads", threads),
+          pbqp_progress_option("progress", report),
+          pbqp_pointer_option("progress-data", &progress),
+          pbqp_diagnostic_option("diagnostics", nullptr),
+          pbqp_pointer_option("diagnostic-data", nullptr)};
+      const pbqp_solve_options invalid{5, invalid_entries};
       raw = solution.get();
       pbqp_error error;
       check(solve(&empty, &invalid, &raw, &error) == PBQP_INVALID);

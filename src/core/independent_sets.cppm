@@ -129,8 +129,7 @@ class IndependentSets::MaximalSearch {
     // P and X are disjoint. Minimize the original-neighbor count in P plus
     // self-membership, equivalently maximizing complement neighbors in P.
     for (const auto *pool : {&frame.possible, &frame.excluded}) {
-      for (size_t node = pool->first(); node < graph.size();
-           node = pool->next(node)) {
+      for (size_t node : *pool) {
         if (!charge(3 * words))
           return false;
         size_t blocked = frame.possible.intersection_count(graph[node]) +

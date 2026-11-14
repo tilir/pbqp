@@ -1,4 +1,4 @@
-# Standard-library Fiddle binding for PBQP C API 1.0.
+# Standard-library Fiddle binding for PBQP C API 2.0.
 # SPDX-License-Identifier: GPL-3.0-only
 # See LICENSE for the full license text.
 
@@ -8,10 +8,9 @@ module PBQP
   module Solver
     NAIVE = 0
     BNB = 1
-    BNBOPT = 2
     GREEDY = 3
     R1R2RN = 4
-    ALL = [NAIVE, BNB, BNBOPT, GREEDY, R1R2RN].freeze
+    ALL = [NAIVE, BNB, GREEDY, R1R2RN].freeze
   end
 
   module Quality
@@ -34,8 +33,63 @@ module PBQP
     extend Fiddle::Importer
     Version = struct ['unsigned int major', 'unsigned int minor', 'unsigned int patch']
     Error = struct ['size_t line', 'char message[192]']
-    Options = struct ['size_t num_threads', 'void* progress', 'void* user_data',
-                      'void* diagnostics', 'void* diagnostic_data']
+    OptionValue = union ['size_t size_value', 'int boolean', 'void* string',
+                         'void* pointer', 'void* progress', 'void* diagnostic']
+    Option = struct ['void* key', 'int type', { 'value' => OptionValue }]
+    Options = struct ['size_t count', 'void* entries']
+
+    # Own key strings, payload strings, and the flat option array throughout C.
+    class OptionMap
+      def initialize(num_threads, options, warning_callback)
+        entries = [['num-threads', num_threads], ['warnings', warning_callback]] + options.to_a
+        @strings = []
+        @warning_callback = warning_callback
+        @storage = Fiddle::Pointer.malloc(entries.size * Option.size, Fiddle::RUBY_FREE)
+        entries.each_with_index do |(key, value), index|
+          key = key.to_s
+          raise ArgumentError, 'option keys must be nonempty and contain no NUL' if key.empty? || key.include?("\0")
+
+          entry = Option.new(@storage + index * Option.size)
+          @strings << key + "\0"
+          entry.key = @strings.last
+          case value
+          when Fiddle::Closure
+            entry.type = 5
+            entry.value.diagnostic = value.to_i
+          when true, false
+            entry.type = 1
+            entry.value.boolean = value ? 1 : 0
+          when Integer
+            unless value.between?(0, 2**(8 * Fiddle::SIZEOF_SIZE_T) - 1)
+              raise ArgumentError, 'integer option must fit in size_t'
+            end
+            entry.type = 0
+            entry.value.size_value = value
+          when String
+            raise ArgumentError, 'string option must contain no NUL' if value.include?("\0")
+
+            entry.type = 2
+            @strings << value + "\0"
+            entry.value.string = @strings.last
+          else
+            raise ArgumentError, 'option values must be boolean, Integer, or String'
+          end
+        end
+        @view = Options.malloc(Fiddle::RUBY_FREE)
+        # count/entries collide with Enumerable methods on Fiddle structs.
+        @view['count'] = entries.size
+        @view['entries'] = @storage
+      end
+
+      def with_pointer
+        yield @view
+      ensure
+        # Refer to owners after the foreign call as well as before it.
+        @storage
+        @strings
+        @warning_callback
+      end
+    end
     Solution = struct ['float cost', 'int quality', 'size_t num_nodes', 'void* options']
     Evaluation = struct ['float cost', 'int is_feasible']
     # Ruby pack's Q/L directives use native byte order and fixed 64/32-bit widths.
@@ -98,7 +152,7 @@ module PBQP
       version = Native::Version.malloc(Fiddle::RUBY_FREE)
       @api.pbqp_get_api_version(version)
       @version = [version.major, version.minor, version.patch].freeze
-      raise LoadError, "unsupported PBQP C API version: #{@version}" unless version.major == 1
+      raise LoadError, "unsupported PBQP C API version: #{@version}" unless version.major == 2
 
       @api.extern('int pbqp_read(const char*, void*, void*)')
       @api.extern('int pbqp_write(const char*, void*, void*)')
@@ -150,22 +204,38 @@ module PBQP
       raise Error.new(status, error) unless status == Status::OK
     end
 
-    def solve(solver = Solver::BNBOPT, num_threads: 1)
+    def solve(solver = Solver::BNB, num_threads: 1, options: {})
       unless num_threads.is_a?(Integer) && num_threads.between?(1, 2**31 - 1)
         raise ArgumentError, 'num_threads must be positive and fit in int'
       end
       raise ArgumentError, 'unknown solver' unless Solver::ALL.include?(solver)
 
-      config = Native::Options.malloc(Fiddle::RUBY_FREE)
-      config.to_ptr[0, Native::Options.size] = "\0" * Native::Options.size
-      config.num_threads = num_threads
+      messages = []
+      callback_failure = nil
+      warning_callback = Fiddle::Closure::BlockCaller.new(
+        Fiddle::TYPE_VOID, [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP]
+      ) do |message, _|
+        begin
+          messages << Fiddle::Pointer.new(message).to_s
+        rescue Exception => failure
+          # Capture before crossing C; rethrow after the synchronous solve.
+          callback_failure = failure
+        end
+      end
+      config = Native::OptionMap.new(num_threads, options, warning_callback)
       out = Fiddle::Pointer.malloc(Fiddle::SIZEOF_VOIDP, Fiddle::RUBY_FREE)
       error = Native::Error.malloc(Fiddle::RUBY_FREE)
-      status = @api.pbqp_solve(solver, require_open, config, out, error)
-      raise Error.new(status, error) unless status == Status::OK
-
+      status = config.with_pointer do |view|
+        @api.pbqp_solve(solver, require_open, view, out, error)
+      end
       pointer = Fiddle::Pointer.new(out[0, Fiddle::SIZEOF_VOIDP].unpack1('J'))
       begin
+        raise callback_failure if callback_failure
+
+        # warn can be customized to raise; emit only after returning from C.
+        messages.each { |message| warn(message) }
+        raise Error.new(status, error) unless status == Status::OK
+
         result = Native::Solution.new(pointer)
         options = result.num_nodes.zero? ? [] : result.options[
           0, result.num_nodes * Fiddle::SIZEOF_SIZE_T

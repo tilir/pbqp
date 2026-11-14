@@ -5,6 +5,7 @@
 require 'pbqp'
 require 'tmpdir'
 require 'weakref'
+require 'stringio'
 
 abort 'expected LIBRARY INPUT' unless ARGV.size == 2
 
@@ -93,7 +94,7 @@ copy = nil
 check(frees == [3])
 
 library = PBQP::Library.new(ARGV[0])
-check(library.version == [1, 0, 0])
+check(library.version == [2, 0, 0])
 closed = nil
 solutions = library.read(ARGV[1]) do |problem|
   closed = problem
@@ -111,6 +112,46 @@ end
 closed.close
 expect_error(IOError) { closed.solve }
 check(solutions.all? { |s| !s.options.empty? && s.frozen? && s.options.frozen? })
+
+original_stderr = $stderr
+warning_output = StringIO.new
+begin
+  $stderr = warning_output
+  library.read(ARGV[1]) do |problem|
+    [0, 1, 2].each do |level|
+      result = problem.solve(PBQP::Solver::BNB, options: {
+        'optimization-level' => level, 'weighted-bounds' => true,
+        'repricing' => false, 'application.setting' => 'ignored'
+      })
+      check(result.cost.zero? && result.quality == PBQP::Quality::OPTIMAL)
+    end
+    strict = expect_error(PBQP::Error) do
+      problem.solve(options: { 'unknown' => true, 'warnings-as-errors' => true })
+    end
+    check(strict.status == PBQP::Status::INVALID)
+    error = expect_error(PBQP::Error) do
+      problem.solve(PBQP::Solver::BNB, options: { 'optimization-level' => 3 })
+    end
+    check(error.status == PBQP::Status::INVALID)
+    expect_error(PBQP::Error) do
+      problem.solve(PBQP::Solver::BNB, options: { 'weighted-bounds' => 1 })
+    end
+    result = problem.solve(PBQP::Solver::NAIVE, options: {
+      'optimization-level' => 'ignored', 'weighted-bounds' => 'ignored'
+    })
+    check(result.cost.zero?)
+    [{ '' => true }, { "a\0b" => true }, { 'key' => "a\0b" },
+     { 'key' => -1 }, { 'key' => 2**100 }, { 'key' => 1.5 }].each do |options|
+      expect_error(ArgumentError) { problem.solve(options: options) }
+    end
+    expect_error(PBQP::Error) { problem.solve(options: { 'num-threads' => 0 }) }
+  end
+
+ensure
+  $stderr = original_stderr
+end
+check(warning_output.string.scan('unrecognized solver option: application.setting').size == 3)
+check(warning_output.string.include?('unrecognized solver option: weighted-bounds'))
 
 Dir.mktmpdir('pbqp-ruby') do |directory|
   path = File.join(directory, 'copy.pbqp')

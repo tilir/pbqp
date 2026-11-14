@@ -17,7 +17,8 @@ def main():
     try:
         library = Library(args.library)
         with library.read(args.input) as problem:
-            solution = problem.solve(Solver.BNBOPT, num_threads=4)
+            solution = problem.solve(Solver.BNB, num_threads=4,
+                                     options={"optimization-level": 2, "repricing": True})
             evaluation = problem.evaluate(solution.options)
             if not evaluation.is_feasible or evaluation.cost != solution.cost:
                 raise RuntimeError("solution evaluation mismatch")

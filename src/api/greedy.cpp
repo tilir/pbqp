@@ -13,6 +13,7 @@ module;
 
 module pbqp;
 import :api_boundary;
+import :solve_options;
 import :error;
 import :diagnostics;
 import :problem;
@@ -27,13 +28,11 @@ extern "C" pbqp_status pbqp_solve_greedy(const pbqp_problem *p,
   return pbqp::api_call(error, [&]() -> pbqp_status {
     if (!out)
       return pbqp::set_error(error, PBQP_INVALID, 0, "missing output pointer");
-    pbqp::thread_count(options);
-    if (options && options->progress)
-      return pbqp::set_error(error, PBQP_INVALID, 0,
-                             "progress is unsupported for heuristic solvers");
+    const pbqp::CommonSolveOptions config(options);
     pbqp::validate(p);
-    const pbqp::Diagnostics log(options ? options->diagnostics : nullptr,
-                                options ? options->diagnostic_data : nullptr);
+    if (auto status = config.check_heuristic(error); status != PBQP_OK)
+      return status;
+    const auto log = config.log;
     log.line("greedy: preparing single-thread heuristic search");
 
     pbqp::GreedySearch search(*p);

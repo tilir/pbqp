@@ -8,7 +8,6 @@ set(PBQP_COMPONENT_SOURCES
   io.cpp
   bruteforce.cpp
   branch_and_bound.cpp
-  branch_and_bound_opt.cpp
   greedy.cpp
   reduction.cpp
   solve.cpp
@@ -18,6 +17,8 @@ list(TRANSFORM PBQP_COMPONENT_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 list(APPEND PBQP_LIBRARY_SOURCES ${PBQP_COMPONENT_SOURCES})
 pbqp_register_format_sources(${PBQP_COMPONENT_SOURCES})
 set(PBQP_COMPONENT_MODULES
+  solve_options.cppm
+  bnb_api.cppm
   api_boundary.cppm
   error.cppm
   diagnostics.cppm

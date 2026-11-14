@@ -64,7 +64,8 @@ void help() {
          "Regalloc edges have INF on the register diagonal and zero "
          "elsewhere.\n"
          "Spill bounds apply only to regalloc. All options also accept "
-         "space-separated values.\n";
+         "space-separated values.\n"
+         "  -Werror  Treat unrecognized-option warnings as errors.\n";
 }
 } // namespace
 
@@ -74,7 +75,9 @@ int main(int argc, char **argv) {
         "--nodes",     "--edges",          "--max-options",
         "--seed",      "--output",         "--mode",
         "--registers", "--spill-cost-min", "--spill-cost-max"};
-    const pbqp_tools::Arguments arguments(argc, argv, names);
+    constexpr std::string_view flags[] = {"-Werror"};
+    const pbqp_tools::Arguments arguments(argc, argv, names, flags);
+    arguments.report_warnings(std::cerr, arguments.has("-Werror"));
     if (arguments.help()) {
       help();
       return 0;
@@ -96,16 +99,15 @@ int main(int argc, char **argv) {
       options.spill_cost_max = spill_cost(
           "--spill-cost-max", arguments.get("--spill-cost-max", "100"));
       if (arguments.has("--max-options"))
-        throw std::invalid_argument("--max-options does not apply to regalloc");
+        arguments.unsupported(std::cerr, "--max-options");
     } else if (mode == "random" || mode == "planted") {
       options.family = mode == "random" ? pbqp_tools::GeneratorFamily::Random
                                         : pbqp_tools::GeneratorFamily::Planted;
       options.max_options =
           number<size_t>("--max-options", arguments.require("--max-options"));
-      if (arguments.has("--registers") || arguments.has("--spill-cost-min") ||
-          arguments.has("--spill-cost-max"))
-        throw std::invalid_argument(
-            "register and spill options require --mode=regalloc");
+      for (auto name : {"--registers", "--spill-cost-min", "--spill-cost-max"})
+        if (arguments.has(name))
+          arguments.unsupported(std::cerr, name);
     } else
       throw std::invalid_argument("unknown generator mode: " +
                                   std::string(mode));

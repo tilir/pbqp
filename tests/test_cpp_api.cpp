@@ -45,7 +45,6 @@ void test_borrowed_and_callbacks() {
   const pbqp_problem problem{1, 0, &node, nullptr};
   pbqp::validate(problem);
   for (auto solver : {pbqp::Solver::Naive, pbqp::Solver::BranchAndBound,
-                      pbqp::Solver::BranchAndBoundOptimized,
                       pbqp::Solver::Greedy, pbqp::Solver::Reduction}) {
     const bool exact =
         solver != pbqp::Solver::Greedy && solver != pbqp::Solver::Reduction;
@@ -66,6 +65,33 @@ void test_borrowed_and_callbacks() {
           (exact ? pbqp::Quality::Optimal : pbqp::Quality::Feasible));
     check(messages > 0 && percent == (exact ? 100u : 0u));
   }
+  for (std::size_t level : {0u, 1u, 2u}) {
+    pbqp::SolveOptions tuned;
+    tuned.parameters["optimization-level"] = level;
+    tuned.parameters["weighted-bounds"] = true;
+    tuned.parameters["application.setting"] = std::string("ignored");
+    const auto result =
+        pbqp::solve(problem, pbqp::Solver::BranchAndBound, tuned);
+    check(result.cost == 0 && result.quality == pbqp::Quality::Optimal);
+  }
+  pbqp::SolveOptions invalid_profile;
+  invalid_profile.parameters["optimization-level"] = std::size_t{3};
+  invalid([&] {
+    pbqp::solve(problem, pbqp::Solver::BranchAndBound, invalid_profile);
+  });
+  pbqp::SolveOptions warned;
+  unsigned warning_count = 0;
+  warned.parameters["unrecognized"] = true;
+  warned.warnings = [&](std::string_view text) {
+    warning_count +=
+        text.starts_with("warning: unrecognized solver option: unrecognized");
+  };
+  check(pbqp::solve(problem, pbqp::Solver::BranchAndBound, warned).cost == 0);
+  check(warning_count == 1);
+  warned.parameters["warnings-as-errors"] = true;
+  warning_count = 0;
+  invalid([&] { pbqp::solve(problem, pbqp::Solver::BranchAndBound, warned); });
+  check(warning_count == 0);
   const auto empty = pbqp::solve(pbqp_problem{});
   check(empty.cost == 0 && empty.options.empty());
   invalid([&] { pbqp::solve(problem, static_cast<pbqp::Solver>(7)); });
@@ -77,9 +103,12 @@ void test_borrowed_and_callbacks() {
   invalid([&] { pbqp::solve(problem, pbqp::Solver::Naive, bad); });
   bad.num_threads = 1;
   bad.progress = [](unsigned) {};
+  bad.parameters["warnings-as-errors"] = true;
   invalid([&] { pbqp::solve(problem, pbqp::Solver::Greedy, bad); });
 
-  for (bool diagnostic : {false, true}) {
+  enum class CallbackKind { Progress, Diagnostic, Warning };
+  for (auto kind : {CallbackKind::Progress, CallbackKind::Diagnostic,
+                    CallbackKind::Warning}) {
     unsigned calls = 0;
     pbqp::SolveOptions options;
     options.num_threads = 4;
@@ -87,13 +116,16 @@ void test_borrowed_and_callbacks() {
       ++calls;
       throw std::runtime_error("callback failure");
     };
-    if (diagnostic)
+    if (kind == CallbackKind::Diagnostic)
       options.diagnostics = [&](std::string_view) { fail(); };
-    else
+    else if (kind == CallbackKind::Warning) {
+      options.parameters["unrecognized"] = true;
+      options.warnings = [&](std::string_view) { fail(); };
+    } else
       options.progress = [&](unsigned) { fail(); };
     bool caught = false;
     try {
-      pbqp::solve(problem, pbqp::Solver::BranchAndBoundOptimized, options);
+      pbqp::solve(problem, pbqp::Solver::BranchAndBound, options);
     } catch (const std::runtime_error &error) {
       caught = std::string_view(error.what()) == "callback failure";
     }

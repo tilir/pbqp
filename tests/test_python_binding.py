@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import warnings
 
 from pbqp import Library, PBQPError, Quality, Solver, Status
 
@@ -20,7 +21,7 @@ class BindingTests(unittest.TestCase):
         self.library = Library(LIBRARY)
 
     def test_all_solvers_and_lifetime(self):
-        self.assertEqual(self.library.version, (1, 0, 0))
+        self.assertEqual(self.library.version, (2, 0, 0))
         with self.library.read(EXAMPLE) as problem:
             solutions = []
             for solver in Solver:
@@ -38,6 +39,48 @@ class BindingTests(unittest.TestCase):
         self.assertTrue(all(s.options for s in solutions))
         with self.assertRaises(RuntimeError):
             problem.solve()
+
+    def test_open_option_map(self):
+        with self.library.read(EXAMPLE) as problem:
+            for level in (0, 1, 2):
+                with self.assertWarnsRegex(UserWarning, "application.setting"):
+                    result = problem.solve(Solver.BNB, options={
+                        "optimization-level": level,
+                        "weighted-bounds": True,
+                        "repricing": False,
+                        "application.setting": "ignored",
+                    })
+                self.assertEqual(result.cost, 0)
+                self.assertEqual(result.quality, Quality.OPTIMAL)
+            with self.assertRaises(PBQPError) as caught:
+                problem.solve(Solver.BNB, options={"optimization-level": 3})
+            self.assertEqual(caught.exception.status, Status.INVALID)
+            with self.assertRaises(PBQPError):
+                problem.solve(Solver.BNB, options={"weighted-bounds": 1})
+            with self.assertRaises(PBQPError) as caught:
+                problem.solve(options={"unknown": True, "warnings-as-errors": True})
+            self.assertEqual(caught.exception.status, Status.INVALID)
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                with self.assertRaises(UserWarning):
+                    problem.solve(options={"unknown": True})
+            # Algorithm-specific keys warn on unrelated solvers.
+
+            with warnings.catch_warnings(record=True) as recorded:
+                warnings.simplefilter("always")
+                self.assertEqual(problem.solve(Solver.NAIVE, options={
+                    "optimization-level": "ignored", "weighted-bounds": "ignored"
+                }).cost, 0)
+            self.assertEqual(len(recorded), 2)
+            for options in ({"": True}, {"a\0b": True}, {"key": "a\0b"},
+                            {"key": -1}, {"key": 2**100}):
+                with self.assertRaises(ValueError):
+                    problem.solve(options=options)
+            with self.assertRaises(TypeError):
+                problem.solve(options={"key": 1.5})
+            # A map key follows the convenience argument and therefore wins.
+            with self.assertRaises(PBQPError):
+                problem.solve(options={"num-threads": 0})
 
     def test_roundtrip_and_failures(self):
         with tempfile.TemporaryDirectory() as directory:

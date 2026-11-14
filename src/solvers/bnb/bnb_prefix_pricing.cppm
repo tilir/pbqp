@@ -17,10 +17,10 @@ module;
 #include <cstddef>
 #include <span>
 #include <vector>
-module pbqp:bnbopt_prefix_pricing;
+module pbqp:bnb_prefix_pricing;
 import :bitset;
 import :independent_sets;
-import :bnbopt_pricing;
+import :bnb_pricing;
 
 namespace pbqp {
 enum class PrefixPricingStatus { RootUnavailable, CandidateBudget, Enabled };
@@ -146,8 +146,7 @@ void PrefixPriceOptimizer::reduce_patterns(const BitSet<> &assigned) noexcept {
   for (const auto &pattern : sets) {
     offsets[index++] = used;
     const size_t first = used;
-    for (size_t id = pattern.first(); id < pattern.size();
-         id = pattern.next(id))
+    for (size_t id : pattern)
       if (!assigned.test(id))
         members[used++] = id;
     alpha = std::max(alpha, used - first);

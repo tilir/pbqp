@@ -1,6 +1,6 @@
 # PBQP
 
-A PBQP library with C API 1.0, a C++23 interface, and Python/Ruby bindings.
+A PBQP library with C API 2.0, a C++23 interface, and Python/Ruby bindings.
 Reads and writes problems and solves them with exact and heuristic algorithms.
 
 Requires CMake 3.28 or newer, Ninja, Clang 21.1 with `clang-scan-deps`,
@@ -28,6 +28,10 @@ List available solvers, solve a problem, or generate a random instance:
 ```
 
 Exact solvers default to one thread; `--numthreads=N` sets their TBB concurrency limit.
+`bnb`/`bnbopt` default to `-O1`/`-O2`; select `-O0`, `-O1`, or `-O2` and override
+individual optimizations with `-fNAME`/`-fno-NAME`. See the
+[optimization options](doc/bnbopts.md#optimization-profiles-and-overrides).
+Unknown or inapplicable options warn; `-Werror` makes warnings fatal.
 
 Optional Google Benchmark cases measure reduction scaling and exact-solver
 thread counts. With `libbenchmark-dev` installed:

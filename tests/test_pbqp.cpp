@@ -9,6 +9,7 @@
  * See LICENSE for the full license text.
  */
 #include "pbqp.h"
+#include "solver_profiles.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -158,7 +159,7 @@ void solve_text(const std::string &text, pbqp_status expected, pbqp_cost_t cost,
   check(read_text(text, &p, nullptr) == PBQP_OK);
   check_roundtrip(p);
   for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_branch_and_bound,
-                     pbqp_solve_branch_and_bound_optimized}) {
+                     pbqp_test::solve_profile<2>}) {
     check(solve(p, nullptr, &s, nullptr) == expected);
     if (expected == PBQP_OK) {
       check(s && s->cost == cost && s->num_nodes == p->num_nodes);
@@ -472,26 +473,86 @@ void check_reference(const pbqp_problem &p) {
   };
   verify_exact(pbqp_solve_bruteforce, "naive");
   verify_exact(pbqp_solve_branch_and_bound, "bnb", false);
-  verify_exact(pbqp_solve_branch_and_bound_optimized, "bnbopt", false);
+  verify_exact(pbqp_test::solve_profile<2>, "bnbopt", false);
+  verify_exact(pbqp_test::solve_profile<0>, "B&B O0", false);
+  constexpr const char *optimization_names[] = {
+      "option-order",       "forward-checking", "register-symmetry",
+      "greedy-seed",        "reduction-seed",   "prefix-planning",
+      "work-donation",      "structural-order", "clique-bounds",
+      "cardinality-bounds", "weighted-bounds",  "repricing",
+      "cover-seed"};
+  for (auto name : optimization_names)
+    for (bool enabled : {false, true}) {
+      auto configured = [&](const pbqp_problem *input,
+                            const pbqp_solve_options *, pbqp_solution **out,
+                            pbqp_error *error) {
+        const pbqp_option entries[] = {
+            pbqp_size_option("optimization-level", enabled ? 0 : 2),
+            pbqp_bool_option(name, enabled)};
+        const pbqp_solve_options options{2, entries};
+        return pbqp_solve_branch_and_bound(input, &options, out, error);
+      };
+      verify_exact(configured, std::string(enabled ? "O0 + " : "O2 - ") + name,
+                   false);
+    }
+
+  // Exercise interactions beyond one-at-a-time ablations on the same oracle.
+  const std::vector<std::vector<const char *>> combinations{
+      {"weighted-bounds", "repricing"},
+      {"structural-order", "clique-bounds"},
+      {"option-order", "greedy-seed", "register-symmetry",
+       "cardinality-bounds"},
+      {"forward-checking", "reduction-seed", "prefix-planning", "work-donation",
+       "weighted-bounds", "repricing"}};
+  for (const auto &combination : combinations) {
+    std::string description = "O0";
+    for (auto name : combination)
+      description += " + " + std::string(name);
+    auto configured = [&](const pbqp_problem *input, const pbqp_solve_options *,
+                          pbqp_solution **out, pbqp_error *error) {
+      std::vector<pbqp_option> entries{
+          pbqp_size_option("optimization-level", 0)};
+      for (auto name : combination)
+        entries.push_back(pbqp_bool_option(name, 1));
+      const pbqp_solve_options options{entries.size(), entries.data()};
+      return pbqp_solve_branch_and_bound(input, &options, out, error);
+    };
+    verify_exact(configured, description, false);
+  }
   for (size_t threads : {size_t{2}, size_t{4}}) {
     auto parallel = [&](const pbqp_problem *p, const pbqp_solve_options *,
                         pbqp_solution **out, pbqp_error *error) {
-      const pbqp_solve_options options{threads, nullptr, nullptr, nullptr,
-                                       nullptr};
+      pbqp_option options_entries[] = {
+          pbqp_size_option("num-threads", threads),
+          pbqp_progress_option("progress", nullptr),
+          pbqp_pointer_option("progress-data", nullptr),
+          pbqp_diagnostic_option("diagnostics", nullptr),
+          pbqp_pointer_option("diagnostic-data", nullptr)};
+      const pbqp_solve_options options{5, options_entries};
       return pbqp_solve_branch_and_bound(p, &options, out, error);
     };
     verify_exact(parallel, "parallel bnb", false);
     auto optimized = [&](const pbqp_problem *p, const pbqp_solve_options *,
                          pbqp_solution **out, pbqp_error *error) {
-      const pbqp_solve_options options{threads, nullptr, nullptr, nullptr,
-                                       nullptr};
-      return pbqp_solve_branch_and_bound_optimized(p, &options, out, error);
+      pbqp_option options_entries[] = {
+          pbqp_size_option("num-threads", threads),
+          pbqp_progress_option("progress", nullptr),
+          pbqp_pointer_option("progress-data", nullptr),
+          pbqp_diagnostic_option("diagnostics", nullptr),
+          pbqp_pointer_option("diagnostic-data", nullptr)};
+      const pbqp_solve_options options{5, options_entries};
+      return pbqp_test::solve_profile<2>(p, &options, out, error);
     };
     verify_exact(optimized, "parallel bnbopt", false);
     auto exhaustive = [&](const pbqp_problem *p, const pbqp_solve_options *,
                           pbqp_solution **out, pbqp_error *error) {
-      const pbqp_solve_options options{threads, nullptr, nullptr, nullptr,
-                                       nullptr};
+      pbqp_option options_entries[] = {
+          pbqp_size_option("num-threads", threads),
+          pbqp_progress_option("progress", nullptr),
+          pbqp_pointer_option("progress-data", nullptr),
+          pbqp_diagnostic_option("diagnostics", nullptr),
+          pbqp_pointer_option("diagnostic-data", nullptr)};
+      const pbqp_solve_options options{5, options_entries};
       return pbqp_solve_bruteforce(p, &options, out, error);
     };
     verify_exact(exhaustive, "parallel naive");
@@ -569,7 +630,7 @@ void test_direct_api() {
     check(error.message[0]);
     for (auto solve :
          {pbqp_solve_bruteforce, pbqp_solve_greedy, pbqp_solve_branch_and_bound,
-          pbqp_solve_branch_and_bound_optimized, pbqp_solve_reduction}) {
+          pbqp_test::solve_profile<2>, pbqp_solve_reduction}) {
       pbqp_solution *out = nullptr;
       check(solve(&problem, nullptr, &out, &error) == PBQP_INVALID && !out);
     }
@@ -600,7 +661,7 @@ void test_direct_api() {
   p.num_edges = 1;
   for (auto solve :
        {pbqp_solve_bruteforce, pbqp_solve_greedy, pbqp_solve_branch_and_bound,
-        pbqp_solve_branch_and_bound_optimized, pbqp_solve_reduction})
+        pbqp_test::solve_profile<2>, pbqp_solve_reduction})
     check(solve(&p, nullptr, nullptr, nullptr) == PBQP_INVALID);
   check(pbqp_read("unused", nullptr, nullptr) == PBQP_INVALID);
   pbqp_problem empty{0, 0, nodes, edges};
@@ -1057,11 +1118,16 @@ void test_progress() {
       if (forbidden && !costs.empty())
         std::fill(costs.back().begin(), costs.back().end(), PBQP_INF);
       for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_branch_and_bound,
-                         pbqp_solve_branch_and_bound_optimized}) {
+                         pbqp_test::solve_profile<2>}) {
         ProgressLog log;
         pbqp_solution *progress = nullptr, *plain = nullptr;
-        const pbqp_solve_options config{1, collect_progress, &log, nullptr,
-                                        nullptr};
+        pbqp_option config_entries[] = {
+            pbqp_size_option("num-threads", 1),
+            pbqp_progress_option("progress", collect_progress),
+            pbqp_pointer_option("progress-data", &log),
+            pbqp_diagnostic_option("diagnostics", nullptr),
+            pbqp_pointer_option("diagnostic-data", nullptr)};
+        const pbqp_solve_options config{5, config_entries};
         auto status = solve(&p, &config, &progress, nullptr);
         check(status == pbqp_solve_bruteforce(&p, nullptr, &plain, nullptr));
         check(log.count == 100);
@@ -1083,11 +1149,16 @@ void test_progress() {
     }
   }
   for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_branch_and_bound,
-                     pbqp_solve_branch_and_bound_optimized}) {
+                     pbqp_test::solve_profile<2>}) {
     ProgressLog log;
     pbqp_solution *solution = nullptr;
-    const pbqp_solve_options config{1, collect_progress, &log, nullptr,
-                                    nullptr};
+    pbqp_option config_entries[] = {
+        pbqp_size_option("num-threads", 1),
+        pbqp_progress_option("progress", collect_progress),
+        pbqp_pointer_option("progress-data", &log),
+        pbqp_diagnostic_option("diagnostics", nullptr),
+        pbqp_pointer_option("diagnostic-data", nullptr)};
+    const pbqp_solve_options config{5, config_entries};
     check(solve(nullptr, &config, &solution, nullptr) == PBQP_INVALID);
     check(!solution && log.count == 0);
     pbqp_problem empty{};

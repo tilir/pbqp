@@ -14,6 +14,7 @@ module;
 
 module pbqp;
 import :api_boundary;
+import :solve_options;
 import :bruteforce;
 import :bruteforce_parallel;
 import :error;
@@ -29,14 +30,16 @@ pbqp_status pbqp_solve_bruteforce(const pbqp_problem *p,
   return pbqp::api_call(error, [&]() -> pbqp_status {
     if (!out)
       return pbqp::set_error(error, PBQP_INVALID, 0, "missing output pointer");
-    size_t threads = pbqp::thread_count(options);
+    const pbqp::CommonSolveOptions config(options);
+    size_t threads = config.threads;
     pbqp::validate(p);
-    const pbqp::Diagnostics log(options ? options->diagnostics : nullptr,
-                                options ? options->diagnostic_data : nullptr);
+    if (auto status = config.check_unknown(error); status != PBQP_OK)
+      return status;
+    const auto log = config.log;
     log.line("naive: exhaustive lexicographic search; requested threads=",
              threads);
-    auto progress = options ? options->progress : nullptr;
-    auto data = options ? options->user_data : nullptr;
+    auto progress = config.progress;
+    auto data = config.progress_data;
     if (threads == 1) {
       pbqp::BruteForceSearch search(*p, progress, data);
       search.prepare();

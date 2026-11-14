@@ -11,7 +11,6 @@
 module;
 #include "pbqp.h"
 #include <exception>
-#include <limits>
 #include <new>
 #include <stdexcept>
 
@@ -20,13 +19,6 @@ import :error;
 import :failure;
 
 namespace pbqp {
-size_t thread_count(const pbqp_solve_options *options) {
-  size_t count = options ? options->num_threads : 1;
-  if (!count || count > static_cast<size_t>(std::numeric_limits<int>::max()))
-    fail(PBQP_INVALID, "num_threads must be positive and fit in int");
-  return count;
-}
-
 template <typename Operation>
 pbqp_status api_call(pbqp_error *error, Operation operation) noexcept {
   clear_error(error);

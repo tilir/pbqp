@@ -8,7 +8,8 @@ abort 'Usage: ruby solve.rb LIBRARY INPUT' unless ARGV.size == 2
 begin
   library = PBQP::Library.new(ARGV[0])
   solution = library.read(ARGV[1]) do |problem|
-    result = problem.solve(PBQP::Solver::BNBOPT, num_threads: 4)
+    result = problem.solve(PBQP::Solver::BNB, num_threads: 4,
+                           options: { 'optimization-level' => 2, 'repricing' => true })
     evaluation = problem.evaluate(result.options)
     unless evaluation.is_feasible && evaluation.cost == result.cost
       raise 'solution evaluation mismatch'

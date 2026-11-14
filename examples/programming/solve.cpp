@@ -21,10 +21,12 @@ int main(int argc, char **argv) {
       const auto problem = pbqp::Problem::read(argv[1]);
       pbqp::SolveOptions options;
       options.num_threads = 4;
+      options.parameters["optimization-level"] = std::size_t{2};
+      options.parameters["repricing"] = true;
       options.diagnostics = [](std::string_view message) {
         std::cerr << message << '\n';
       };
-      return problem.solve(pbqp::Solver::BranchAndBoundOptimized, options);
+      return problem.solve(pbqp::Solver::BranchAndBound, options);
     }();
     // The solution's vector remains valid after the problem is destroyed.
     std::cout.precision(std::numeric_limits<pbqp::Cost>::max_digits10);

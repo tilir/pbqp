@@ -43,7 +43,7 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
   never suppress GCC module-serialization errors or export private helpers.
 - `core` and generic `search` must not import concrete solvers. B&B orchestration
   may compose heuristic seeds; bounds and workers remain independent of them.
-  `src/solvers/bnb` owns baseline bounds and the engine shared with bnbopt.
+  `src/solvers/bnb` owns all B&B profiles, term bounds, and structural components.
 - Use C++ streams, standard containers/ownership, and const-correct views. No C
   stdio/allocation in C++ and no `const_cast` exposing mutable const storage.
 - Use `typename` for template type parameters. Do not introduce helper macros;
@@ -75,15 +75,27 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
 
 ## Ownership, errors, and stable API
 
-- C API 1.x preserves existing signatures, enum numbers, public layouts/field
+- C API 2.x preserves existing signatures, enum numbers, public layouts/field
   types, and ownership contracts. Breaking changes require a major version;
   additions use minor versions and compatible fixes patch versions. Keep header
   constants, `pbqp_get_api_version`, project VERSION, and shared SOVERSION aligned.
   Use enum constants, not version macros. File-format versioning is independent.
 - Keep exactly one dedicated entry per solver with shared `pbqp_solve_options`,
-  plus `pbqp_solve` enum dispatch. No `_with_options`/callback-specific variants.
+  plus `pbqp_solve` enum dispatch. B&B has one C entry and selector; its CLI names
+  `bnb` and `bnbopt` differ only in default optimization profile (O1/O2).
+  Keep shared O0/O1/O2 profiles and positive/negative per-optimization overrides.
+  New structural optimizations join O2 by default, not O1.
+  No `_with_options`/callback-specific variants.
   NULL options select one thread with no callbacks; thread limits are positive
-  and int-representable. Heuristics use one thread and reject progress callbacks.
+  and int-representable. Heuristics use one thread; unsupported progress callbacks and larger thread
+  requests warn and are ignored, or return INVALID under warnings-as-errors.
+- `pbqp_solve_options` is an open borrowed map of tagged entries. Last key wins;
+  every solver skips keys it does not consume and validates consumed types and
+  values before preparation. Report unknown effective keys through the warning
+  sink, falling back to diagnostics; warnings-as-errors makes them INVALID before
+  preparation callbacks/search. Keep CLI warnings independent of --verbose and
+  use -Werror for strict mode in both tools. Resolve profiles before boolean overrides. Do not
+  add per-optimization fields to the public map view or expose private modules.
 - Public writes/solvers validate inputs themselves. Pointer validity and allocated
   lengths remain the caller's responsibility. Borrow input unchanged only during
   the call; returned solution options must have independent ownership.
@@ -139,7 +151,9 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
   valid weaker bounds. Keep all-subset reference enumeration strictly in tests
   for differential comparison; production has no catalogue-kind selector.
   Dynamic bitsets have no fixed node/register word-width cap, clear padding bits,
-  reject bool/signed/cv-qualified words, and reuse destination storage.
+  reject bool/signed/cv-qualified words, and reuse destination storage. Their
+  const forward range yields ascending set-bit indices; num_bits() is the bit
+  extent, count() is the population. Do not expose the extent as range size().
 - Preparation may allocate; solver DFS/backpropagation must not allocate, validate,
   or add exception handling. Build reduction fill matrices and worker scratch
   beforehand. Keep reduction mutation/index/cache invariants in doc/solvers.md.
@@ -160,11 +174,13 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
 
 ## CLI, documentation, and verification
 
-- Preserve named options, duplicate/unknown/inapplicable-option rejection, and
-  documented exit codes. No positional solve/dump subcommands. Keep terminal
+- Preserve named options and documented exit codes. Known but inapplicable
+  options also warn and are skipped, with -Werror promoting them to errors. Unknown CLI options warn and are ignored as single tokens; -Werror
+  promotes warnings to errors before solving or writing output. Solver CLI repeats use the last value/form, including profiles and
+  positive/negative optimization flags; the generator still rejects duplicates. No positional solve/dump subcommands. Keep terminal
   output in tools; COST/NODE stdout must not change with heartbeat or verbose.
 - `--verbose` describes cached preparation decisions outside DFS. Keep generic
-  metadata in algorithms and bnbopt formatting separate; never rescan eligibility
+  metadata in algorithms and B&B diagnostic formatting separate; never rescan eligibility
   in the CLI or claim an incomplete catalogue is usable.
 - Preserve PBQP 1 ordering/comments and float round trips with classic locale and
   max_digits10. Keep generator families and deterministic sampling contracts.
