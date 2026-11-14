@@ -7,19 +7,21 @@ set(PBQP_PARALLEL_TEST_SOURCES test_parallel_exact.cpp)
 set(PBQP_REDUCTION_TEST_SOURCES test_reduction.cpp)
 set(PBQP_C_API_TEST_SOURCES test_c_api.c)
 set(PBQP_CPP_API_TEST_SOURCES test_cpp_api.cpp)
+set(PBQP_GENERATOR_TEST_SUPPORT generator_test_support.cpp)
 set(PBQP_INTERNAL_TEST_SOURCES test_search_internals.cpp)
 set(PBQP_INTERNAL_TEST_SUPPORT search_test_support.cpp bnb_bounds_test_support.cpp
   bnb_progress_test_support.cpp)
 pbqp_register_format_sources(${PBQP_TEST_SOURCES} ${PBQP_REDUCTION_TEST_SOURCES}
   ${PBQP_C_API_TEST_SOURCES} ${PBQP_CPP_API_TEST_SOURCES}
   ${PBQP_PARALLEL_TEST_SOURCES}
-  ${PBQP_INTERNAL_TEST_SOURCES} ${PBQP_INTERNAL_TEST_SUPPORT} solver_profiles.hpp)
+  ${PBQP_INTERNAL_TEST_SOURCES} ${PBQP_INTERNAL_TEST_SUPPORT} ${PBQP_GENERATOR_TEST_SUPPORT} solver_profiles.hpp)
 set(PBQP_FORMAT_SOURCES "${PBQP_FORMAT_SOURCES}" PARENT_SCOPE)
 
 if(NOT BUILD_TESTING)
   return()
 endif()
 
+target_sources(pbqp_generator PRIVATE ${PBQP_GENERATOR_TEST_SUPPORT})
 add_executable(test_pbqp ${PBQP_TEST_SOURCES})
 target_link_libraries(test_pbqp PRIVATE pbqp_generator)
 pbqp_configure_cxx_target(test_pbqp PRIVATE)

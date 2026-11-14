@@ -9,6 +9,9 @@ module;
 #include "pbqp.h"
 #include <array>
 #include <string_view>
+// Keep allocator definitions reachable when instantiating imported worker
+// vectors.
+#include <vector>
 module pbqp:bnb_api;
 import :api_boundary;
 import :solve_options;

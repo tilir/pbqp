@@ -16,6 +16,7 @@ module;
 #include <cmath>
 #include <istream>
 #include <string>
+#include <string_view>
 
 module pbqp:text_reader;
 import :failure;
@@ -37,6 +38,13 @@ public:
   size_t token_line() const noexcept { return current_token_line; }
 
   bool next();
+
+  // Borrowed until the next token is read.
+  std::string_view word() {
+    required();
+    return token;
+  }
+
   void expect(const char *word);
   size_t size();
   pbqp_cost_t cost();

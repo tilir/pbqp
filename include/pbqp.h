@@ -7,7 +7,7 @@
  * cost algebra, text I/O, ownership helpers, and exact/heuristic solvers.
  * C API version 2.0 is described in doc/c_api.md. The implementation uses
  * C++23; all public declarations are C-compatible. See doc/format.md for the
- * PBQP 1 text format.
+ * PBQP 1/2 text formats.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  * This program is free software: you can redistribute it and/or modify it
@@ -43,7 +43,7 @@ extern "C" {
 /** Compile-time C API version. These constants describe this header; query
  * pbqp_get_api_version when loading a library built separately. API 2.x
  * preserves existing signatures, numeric enum values, and public layouts.
- * The PBQP 1 file-format version is independent of the C API version. */
+ * Text-format versions are independent of the C API version. */
 enum {
   PBQP_API_VERSION_MAJOR = 2, /**< Breaking compatibility version. */
   PBQP_API_VERSION_MINOR = 0, /**< Compatible API additions. */
@@ -169,17 +169,20 @@ typedef struct pbqp_evaluation {
   int is_feasible;
 } pbqp_evaluation;
 
-/** Reads a complete file at the null-terminated path. Only whitespace/comments
- * may follow END. On success, transfers ownership of the problem and all its
- * arrays to the caller; release them using pbqp_problem_free. Treat the
- * returned object and its arrays as read-only, preserving pointers and sizes.
- * Sets *out to NULL on failure. error may be NULL. */
+/** Reads a complete PBQP 1 or PBQP 2 file at the null-terminated path. Only
+ * whitespace/comments may follow END. On success, transfers ownership of the
+ * problem and all its arrays to the caller; release them using
+ * pbqp_problem_free. Treat the returned object and its arrays as read-only,
+ * preserving pointers and sizes. PBQP 2 edges can share one owned, read-only
+ * matrix array. Sets *out to NULL on failure. error may be NULL. */
 pbqp_status pbqp_read(const char *path, pbqp_problem **out, pbqp_error *error);
 
 /** Borrows the problem and its arrays for this call without modifying them.
  * Validates the input using the pbqp_validate contract before opening the
  * output file; callers do not need to validate it separately.
- * Writes to the null-terminated path, closing the file before returning and
+ * Writes PBQP 2 with shared dense/sparse matrices to the null-terminated path,
+ * preserving edge order, float values, and signed zero. Original comments are
+ * not retained. Closes the file before returning and
  * reporting any output failure. error may be NULL. */
 pbqp_status pbqp_write(const char *path, const pbqp_problem *problem,
                        pbqp_error *error);

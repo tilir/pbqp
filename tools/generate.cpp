@@ -1,17 +1,20 @@
 /*
  * Random problem generator command-line entry point.
  *
- * Parses named generation parameters and writes a PBQP 1 file through the C
- * API. A seed makes generation reproducible with the same standard library.
+ * Parses named parameters and writes compact PBQP 2 through the C API.
+ * Records reproducible sampling identity and the quoted invocation as comments.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  * Distributed under GNU GPL version 3, WITHOUT ANY WARRANTY.
  * See LICENSE for the full license text.
  */
+#include "generator_version.hpp"
 #include "pbqp.h"
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -43,11 +46,59 @@ pbqp_cost_t spill_cost(std::string_view name, std::string_view value) {
   return result;
 }
 
+std::string generator_identity() {
+  return std::string("pbqp_generate ") + pbqp_tools::build::release + "+" +
+         pbqp_tools::build::fingerprint;
+}
+
+std::string shell_quote(std::string_view argument) {
+  const auto safe = [](unsigned char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.' ||
+           c == '/' || c == '=' || c == ':';
+  };
+  if (!argument.empty() && std::all_of(argument.begin(), argument.end(), safe))
+    return std::string(argument);
+  // Bash ANSI-C quoting preserves even control characters on one comment line.
+  std::string result = "$'";
+  for (unsigned char c : argument) {
+    if (c == '\\' || c == '\'') {
+      result += '\\';
+      result += static_cast<char>(c);
+    } else if (c < 32 || c == 127) {
+      result += '\\';
+      result += static_cast<char>('0' + (c >> 6));
+      result += static_cast<char>('0' + ((c >> 3) & 7));
+      result += static_cast<char>('0' + (c & 7));
+    } else
+      result += static_cast<char>(c);
+  }
+  result += '\'';
+  return result;
+}
+
+void provenance(std::string_view path, int argc, char **argv) {
+  std::ofstream output(std::string(path), std::ios::binary | std::ios::app);
+  if (!output)
+    throw std::runtime_error("cannot open output for generator metadata");
+  output << "# generator: " << generator_identity() << '\n'
+         << "# random: mt19937_64; sampling protocol "
+         << pbqp_tools::generation_protocol << '\n'
+         << "# command:";
+  for (int id = 0; id < argc; ++id)
+    output << ' ' << shell_quote(argv[id]);
+  output << '\n';
+  output.close();
+  if (!output)
+    throw std::runtime_error("generator metadata write failed");
+}
+
 void help() {
   std::cout
       << "Usage: pbqp_generate --nodes=N --edges=M --seed=S --output=FILE "
          "[options]\n"
-         "       pbqp_generate --help\n\n"
+         "       pbqp_generate --help\n"
+         "       pbqp_generate --version\n\n"
          "Required: --nodes=N --edges=M --seed=S --output=FILE\n"
          "Modes (select with --mode=NAME):\n"
          "  random   Unrestricted random costs (default); requires "
@@ -75,11 +126,17 @@ int main(int argc, char **argv) {
         "--nodes",     "--edges",          "--max-options",
         "--seed",      "--output",         "--mode",
         "--registers", "--spill-cost-min", "--spill-cost-max"};
-    constexpr std::string_view flags[] = {"-Werror"};
+    constexpr std::string_view flags[] = {"-Werror", "--version"};
     const pbqp_tools::Arguments arguments(argc, argv, names, flags);
     arguments.report_warnings(std::cerr, arguments.has("-Werror"));
     if (arguments.help()) {
       help();
+      return 0;
+    }
+    if (arguments.has("--version")) {
+      std::cout << generator_identity()
+                << "\nsampling protocol: " << pbqp_tools::generation_protocol
+                << '\n';
       return 0;
     }
     if (!arguments.positional().empty())
@@ -119,6 +176,7 @@ int main(int argc, char **argv) {
       std::cerr << error.message << '\n';
       return 1;
     }
+    provenance(output, argc, argv);
   } catch (const std::exception &error) {
     std::cerr << error.what() << "\nUse --help for usage.\n";
     return 1;

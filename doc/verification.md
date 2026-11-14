@@ -264,3 +264,21 @@ Bitset range checks use independent boolean-vector indices across all supported
 word widths, empty/full/random sets, padding, and empty intervening words. Check
 const/common/forward iterator concepts, unsized range semantics, postfix
 increment, multipass copies, and standard range/iterator algorithms.
+
+
+## PBQP 2 and reproducible generation
+
+Round-trip tests cover PBQP 1 compatibility, PBQP 2 dense/sparse definitions,
+shared matrix ownership, rectangular dimensions, INF/nonzero defaults, signed
+zero, original edge order, and unused definitions. Reject malformed IDs,
+references, dimensions, sparse coordinates/counts, duplicate cells, costs, and
+all truncated token prefixes; no failed read may return a partial object.
+Examples 06 through 10 retain bit-identical costs and edge order after conversion.
+
+Generator tests pin integer rejection/full-width/zero-width draw consumption,
+subnormal/extreme/equal-bound float samples, and numeric fingerprints for all
+three families under direct and complement edge sampling. Run the same tests
+with libstdc++ and libc++; the Release libc++ CI configuration uses
+`-DCMAKE_CXX_FLAGS=-stdlib=libc++`. Both use the standard mt19937_64 engine.
+CLI tests compare task data independently of provenance, query --version, and
+replay a recorded command with spaces, quotes, and a newline in the output path.

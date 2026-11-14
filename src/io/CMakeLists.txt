@@ -5,6 +5,8 @@
 set(PBQP_COMPONENT_MODULES
   text_reader.cppm
   text_writer.cppm
+  problem_reader.cppm
+  problem_writer.cppm
 )
 list(TRANSFORM PBQP_COMPONENT_MODULES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 list(APPEND PBQP_LIBRARY_MODULES ${PBQP_COMPONENT_MODULES})

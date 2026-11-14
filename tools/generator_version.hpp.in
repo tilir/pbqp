@@ -1,0 +1,12 @@
+/*
+ * Generated release and source fingerprint for reproducible generator recipes.
+ *
+ * SPDX-License-Identifier: GPL-3.0-only
+ * See LICENSE for the full license text.
+ */
+#pragma once
+
+namespace pbqp_tools::build {
+constexpr char release[] = "@PROJECT_VERSION@";
+constexpr char fingerprint[] = "@PBQP_GENERATOR_FINGERPRINT@";
+} // namespace pbqp_tools::build

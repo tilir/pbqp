@@ -182,8 +182,15 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
 - `--verbose` describes cached preparation decisions outside DFS. Keep generic
   metadata in algorithms and B&B diagnostic formatting separate; never rescan eligibility
   in the CLI or claim an incomplete catalogue is usable.
-- Preserve PBQP 1 ordering/comments and float round trips with classic locale and
-  max_digits10. Keep generator families and deterministic sampling contracts.
+- Read PBQP 1 and PBQP 2; always write PBQP 2. Preserve node/edge order, numeric
+  values, signed zero, classic locale, and max_digits10 round trips. Named
+  matrices may share one read-only owned array. Validate sparse coordinates,
+  dimensions, references, and partial-read cleanup. Keep encoding generic.
+- Generator sampling uses standardized mt19937_64 plus the fixed protocol in
+  doc/generation.md, not standard-library distributions. Pin consumption order
+  and golden vectors across libstdc++/libc++; protocol changes require a version
+  change. Generator output includes a content-derived identity and Bash-replayable
+  argv comments; never invent provenance for pre-existing fixtures.
 - Keep fixtures in `examples/pbqp` and runnable C/C++/Python/Ruby clients in
   `examples/programming`. Update all consumers when paths change. Native examples
   are optional; bindings use only standard runtimes and an explicit shared-library

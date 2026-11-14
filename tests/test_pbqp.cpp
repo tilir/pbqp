@@ -11,8 +11,10 @@
 #include "pbqp.h"
 #include "solver_profiles.hpp"
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -29,6 +31,10 @@
 #include <vector>
 
 import pbqp.generator;
+
+namespace pbqp_tools {
+void run_generator_sampling_tests();
+} // namespace pbqp_tools
 
 namespace {
 std::string case_context;
@@ -574,6 +580,181 @@ void check_reference(const pbqp_problem &p) {
     } else
       check(status == PBQP_NO_SOLUTION && !heuristic);
   }
+}
+
+std::uint64_t generated_fingerprint(const pbqp_problem &problem) {
+  // Canonical little-endian numeric fingerprint, independent of text
+  // formatting.
+  std::uint64_t hash = 14695981039346656037ULL;
+  auto append = [&](std::uint64_t value, unsigned bytes) {
+    for (unsigned index = 0; index < bytes; ++index) {
+      hash ^= (value >> (8 * index)) & 255;
+      hash *= 1099511628211ULL;
+    }
+  };
+  append(problem.num_nodes, 8);
+  append(problem.num_edges, 8);
+  for (size_t id = 0; id < problem.num_nodes; ++id) {
+    const auto &node = problem.nodes[id];
+    append(node.num_options, 8);
+    for (size_t option = 0; option < node.num_options; ++option)
+      append(std::bit_cast<std::uint32_t>(node.costs[option]), 4);
+  }
+  for (size_t id = 0; id < problem.num_edges; ++id) {
+    const auto &edge = problem.edges[id];
+    append(edge.src, 8);
+    append(edge.tgt, 8);
+    const size_t count = problem.nodes[edge.src].num_options *
+                         problem.nodes[edge.tgt].num_options;
+    for (size_t entry = 0; entry < count; ++entry)
+      append(std::bit_cast<std::uint32_t>(edge.costs[entry]), 4);
+  }
+  return hash;
+}
+
+void test_generator_protocol() {
+  using pbqp_tools::GeneratorFamily;
+
+  struct Golden {
+    GeneratorFamily family;
+    std::uint64_t sparse, dense;
+  };
+
+  constexpr Golden fixtures[] = {
+      {GeneratorFamily::Random, 0x15bcba293c970892ULL, 0x9df0b6b4c8c2e084ULL},
+      {GeneratorFamily::Planted, 0x5424552f66f4d653ULL, 0x5ab1198dcbca11b7ULL},
+      {GeneratorFamily::RegAlloc, 0xa936e4e904cee514ULL,
+       0x2a2d75402a6778f4ULL}};
+  check(pbqp_tools::generation_protocol == 1);
+  for (const auto &fixture : fixtures)
+    for (bool dense : {false, true}) {
+      pbqp_tools::GeneratorOptions options{
+          dense ? size_t{5} : size_t{4}, dense ? size_t{8} : size_t{3}, 3, 42};
+      options.family = fixture.family;
+      options.num_registers = 2;
+      auto owned = pbqp_tools::generate_problem(options);
+      auto view = owned.view();
+      check(generated_fingerprint(view) ==
+            (dense ? fixture.dense : fixture.sparse));
+      if (fixture.family == GeneratorFamily::RegAlloc)
+        for (size_t edge = 1; edge < view.num_edges; ++edge)
+          check(view.edges[edge].costs == view.edges[0].costs);
+    }
+}
+
+void test_format2() {
+  const std::string dense =
+      "# shared rectangular matrix\nPBQP 2 NODES 3 EDGES 2 MATRICES 1 "
+      "NODE 0 2 -1 0 NODE 1 3 0 1 2 NODE 2 3 1 0 2 "
+      "MATRIX 0 2 3 DENSE -0 INF 0.5 2 3 -1 "
+      "EDGE 0 2 0 EDGE 0 1 0 END # trailing metadata\n";
+  pbqp_problem *raw = nullptr;
+  check(read_text(dense, &raw, nullptr) == PBQP_OK);
+  const auto destroy = [](pbqp_problem *p) { pbqp_problem_free(p); };
+  std::unique_ptr<pbqp_problem, decltype(destroy)> parsed(raw);
+  check(parsed->edges[0].costs == parsed->edges[1].costs);
+  check(std::signbit(parsed->edges[0].costs[0]));
+  check_reference(*parsed);
+  check_roundtrip(parsed.get());
+
+  // Every truncated prefix must destroy shared arrays once and clear output.
+  // Use comment-free tokens for systematic truncation.
+  std::string plain = dense.substr(dense.find("PBQP"));
+  plain = plain.substr(0, plain.find('#'));
+  std::istringstream stream(plain);
+  std::string token, prefix;
+  while (stream >> token) {
+    if (token == "END")
+      break;
+    prefix += token + ' ';
+    pbqp_problem *partial = raw;
+    pbqp_error error;
+    check(read_text(prefix, &partial, &error) == PBQP_INVALID && !partial &&
+          error.line);
+  }
+
+  pbqp_cost_t unary[4] = {};
+  const pbqp_node nodes[] = {{4, unary}, {4, unary}, {4, unary}};
+  std::vector<pbqp_cost_t> finite(16, 1.25f), forbidden(16, PBQP_INF);
+  finite.back() = -2;
+  forbidden.front() = 0;
+  auto duplicate = finite;
+  const pbqp_edge edges[] = {{1, 2, finite.data()},
+                             {0, 2, forbidden.data()},
+                             {0, 1, duplicate.data()}};
+  const pbqp_problem original{3, 3, nodes, edges};
+  TemporaryFile file;
+  check(pbqp_write(file.name().c_str(), &original, nullptr) == PBQP_OK);
+  std::ifstream input(file.name());
+  const std::string text((std::istreambuf_iterator<char>(input)), {});
+  check(text.starts_with("PBQP 2\n") &&
+        text.find("MATRICES 2") != std::string::npos);
+  check(text.find("SPARSE 1.25 1") != std::string::npos);
+  check(text.find("SPARSE INF 1") != std::string::npos);
+  check(pbqp_read(file.name().c_str(), &raw, nullptr) == PBQP_OK);
+  parsed.reset(raw);
+  same_problem(&original, parsed.get());
+  check(parsed->edges[0].costs == parsed->edges[2].costs);
+  check_reference(*parsed);
+
+  // Equal numeric zeros with different signs must not alias during interning.
+  std::vector<pbqp_cost_t> positive(16, 0), negative = positive;
+  negative[0] = -0.0f;
+  const pbqp_edge zero_edges[] = {{0, 1, positive.data()},
+                                  {0, 2, negative.data()}};
+  const pbqp_problem zeros{3, 2, nodes, zero_edges};
+  check(pbqp_write(file.name().c_str(), &zeros, nullptr) == PBQP_OK);
+  check(pbqp_read(file.name().c_str(), &raw, nullptr) == PBQP_OK);
+  parsed.reset(raw);
+  check(parsed->edges[0].costs != parsed->edges[1].costs);
+  check(!std::signbit(parsed->edges[0].costs[0]) &&
+        std::signbit(parsed->edges[1].costs[0]));
+
+  check(read_text("PBQP 2 NODES 2 EDGES 1 MATRICES 1 NODE 0 2 0 0 NODE 1 2 0 0 "
+                  "MATRIX 0 2 2 SPARSE INF 2 1 1 -0 0 0 0 EDGE 0 1 0 END",
+                  &raw, nullptr) == PBQP_OK);
+  parsed.reset(raw);
+  check(std::signbit(parsed->edges[0].costs[3]));
+  check_reference(*parsed);
+  check_roundtrip(parsed.get());
+  check(read_text("PBQP 2 NODES 2 EDGES 1 MATRICES 1 NODE 0 1 0 NODE 1 1 0 "
+                  "MATRIX 0 1 1 SPARSE INF 0 EDGE 0 1 0 END",
+                  &raw, nullptr) == PBQP_OK);
+  parsed.reset(raw);
+  check_reference(*parsed);
+  check_roundtrip(parsed.get());
+
+  const std::string header =
+      "PBQP 2 NODES 2 EDGES 1 MATRICES 1 NODE 0 2 0 0 NODE 1 2 0 0 ";
+  const std::string invalid[] = {
+      "PBQP 3 NODES 0 EDGES 0 MATRICES 0 END",
+      header + "MATRIX 1 2 2 DENSE 0 0 0 0 EDGE 0 1 0 END",
+      header + "MATRIX 0 0 2 DENSE EDGE 0 1 0 END",
+      header + "MATRIX 0 2 2 UNKNOWN 0 0 0 0 EDGE 0 1 0 END",
+      header + "MATRIX 0 2 2 DENSE 0 0 0 0 EDGE 0 1 1 END",
+      header + "MATRIX 0 1 4 DENSE 0 0 0 0 EDGE 0 1 0 END",
+      header + "MATRIX 0 2 2 SPARSE 0 5 EDGE 0 1 0 END",
+      header + "MATRIX 0 2 2 SPARSE 0 1 2 0 INF EDGE 0 1 0 END",
+      header + "MATRIX 0 2 2 SPARSE 0 2 0 0 1 0 0 2 EDGE 0 1 0 END",
+      header + "MATRIX 0 2 2 SPARSE -INF 0 EDGE 0 1 0 END",
+      header + "MATRIX 0 2 2 SPARSE 0 1 0 0 nan EDGE 0 1 0 END",
+      "PBQP 2 NODES 0 EDGES 0 MATRICES 18446744073709551615 END"};
+  for (const auto &text : invalid) {
+    raw = parsed.get();
+    pbqp_error error;
+    const auto status = read_text(text, &raw, &error);
+    check((status == PBQP_INVALID || status == PBQP_OVERFLOW) && !raw &&
+          error.line);
+  }
+  check(read_text("PBQP 2 NODES 0 EDGES 0 MATRICES 0 END", &raw, nullptr) ==
+        PBQP_OK);
+  parsed.reset(raw);
+  check_roundtrip(parsed.get());
+  // Unused definitions are valid but are not represented by the public view.
+  check(read_text("PBQP 2 NODES 0 EDGES 0 MATRICES 1 MATRIX 0 1 1 DENSE 0 END",
+                  &raw, nullptr) == PBQP_OK);
+  parsed.reset(raw);
+  check_roundtrip(parsed.get());
 }
 
 void test_generator() {
@@ -1172,6 +1353,9 @@ void test_progress() {
 
 int main() {
   try {
+    pbqp_tools::run_generator_sampling_tests();
+    test_generator_protocol();
+    test_format2();
     test_algebra();
     test_examples();
     test_solver();

@@ -19,7 +19,10 @@ changing partition names or making private partitions available to clients.
 
 C entry points validate borrowed data, invoke the implementation, translate
 exceptions, and transfer independent output ownership. Text I/O entry points
-stay in `api/`; stream mechanics stay in `io/`. oneTBB headers and scheduler
+stay in `api/`; stream mechanics stay in `io/`. `problem_reader.cppm` handles
+both text versions and owns one dense array per PBQP 2 matrix definition;
+`problem_writer.cppm` interns matrix views and selects dense/sparse encoding.
+The C boundary keeps file opening, validation, and exception translation. oneTBB headers and scheduler
 calls stay in `search/parallel.cpp` because some TBB helpers cannot be serialized
 in a GCC module partition.
 
@@ -99,3 +102,21 @@ do not include the bridge.
 See [verification.md](verification.md) for coverage and measurement commands,
 [AGENTS.md](../AGENTS.md) for development rules and [solvers.md](solvers.md)
 for algorithm, numerical, and progress contracts.
+
+
+## Generator implementation
+
+`tools/generator.cppm` is the public `pbqp.generator` interface: options, owning
+problem views, and short accessors. Long sampling and generation routines live
+in `generator.cpp`; its non-exported `:sampling` partition implements the fixed
+integer and binary32 conversions over standard mt19937_64. Keeping that import
+in the implementation lets CMake keep the partition PRIVATE while the primary
+interface remains PUBLIC. Test-only `generator_test_support.cpp` compiles inside
+the owning generator module and checks golden conversion vectors.
+
+Regalloc generation owns one shared interference matrix, and PBQP 2 parsing
+retains shared matrix arrays behind C views. `cmake/GeneratorVersion.cmake`
+configures a private identity header from an explicit source list; formatting
+registers its template, not generated output. CLI provenance is appended as
+comments after END without extending the C problem struct or retaining comments
+inside library views.

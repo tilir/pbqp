@@ -22,11 +22,19 @@ jobs:
       matrix:
         include:
           - name: Release
+            cxx_flags: ""
             build_type: Release
             sanitizer_flags: ""
             shared_libs: "ON"
             docs: "ON"
+          - name: Release libc++
+            cxx_flags: -stdlib=libc++
+            build_type: Release
+            sanitizer_flags: ""
+            shared_libs: "OFF"
+            docs: "OFF"
           - name: ASan + UBSan
+            cxx_flags: ""
             build_type: Debug
             sanitizer_flags: -fsanitize=address,undefined -fno-omit-frame-pointer
             shared_libs: "OFF"
@@ -45,19 +53,20 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/llvm-21.list
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang-21 clang-tools-21 clang-format-21 libclang-rt-21-dev cmake ninja-build libtbb-dev python3 doxygen
+            clang-21 clang-tools-21 clang-format-21 libclang-rt-21-dev \
+            libc++-21-dev libc++abi-21-dev cmake ninja-build libtbb-dev python3 doxygen
           clang++-21 --version
           clang-format-21 --version
           cmake --version
 
       - name: Set up Ruby
-        if: matrix.build_type == 'Release'
+        if: matrix.shared_libs == 'ON'
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.4'
 
       - name: Check Ruby and Fiddle
-        if: matrix.build_type == 'Release'
+        if: matrix.shared_libs == 'ON'
         run: |
           ruby --version
           ruby -rfiddle/import -e 'puts "Fiddle available"'
@@ -72,7 +81,7 @@ jobs:
           -DCMAKE_C_COMPILER=clang-21
           -DCMAKE_CXX_COMPILER=clang++-21
           -DCMAKE_C_FLAGS="${{ matrix.sanitizer_flags }}"
-          -DCMAKE_CXX_FLAGS="${{ matrix.sanitizer_flags }}"
+          -DCMAKE_CXX_FLAGS="${{ matrix.sanitizer_flags }} ${{ matrix.cxx_flags }}"
 
       - name: Check formatting
         if: matrix.build_type == 'Release'
@@ -88,11 +97,11 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Generate API reference
-        if: matrix.build_type == 'Release'
+        if: matrix.docs == 'ON'
         run: cmake --build build --target docs
 
       - name: Upload API reference
-        if: matrix.build_type == 'Release'
+        if: matrix.docs == 'ON'
         uses: actions/upload-artifact@v4
         with:
           name: api-reference

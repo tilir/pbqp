@@ -32,12 +32,18 @@ void validate_costs(const pbqp_cost_t *costs, size_t count) {
       fail(PBQP_INVALID, "costs must be finite or positive infinity");
 }
 
-size_t matrix_size(const pbqp_problem &p, const pbqp_edge &e, size_t line = 0) {
-  size_t rows = p.nodes[e.src].num_options, cols = p.nodes[e.tgt].num_options;
+size_t matrix_size(size_t rows, size_t cols, size_t line = 0) {
+  if (!rows || !cols)
+    fail(PBQP_INVALID, "matrix dimensions must be positive", line);
   if (rows > std::numeric_limits<size_t>::max() / cols)
     fail(PBQP_OVERFLOW, "matrix dimensions overflow", line);
   check_count<pbqp_cost_t>(rows * cols, line);
   return rows * cols;
+}
+
+size_t matrix_size(const pbqp_problem &p, const pbqp_edge &e, size_t line = 0) {
+  return matrix_size(p.nodes[e.src].num_options, p.nodes[e.tgt].num_options,
+                     line);
 }
 
 void validate(const pbqp_problem *p) {

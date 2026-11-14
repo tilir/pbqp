@@ -28,7 +28,7 @@ as the `api-reference` artifact.
 The current C API is **2.0.0**. Header constants
 `PBQP_API_VERSION_MAJOR`, `PBQP_API_VERSION_MINOR`, and `PBQP_API_VERSION_PATCH`
 describe the header; `pbqp_get_api_version` reports the linked library's version.
-The independent `PBQP 1` file-format signature is not an API version.
+The independent `PBQP 1`/`PBQP 2` signatures are not C API versions.
 
 API 2.x preserves existing function signatures, numeric enum values, public
 struct layouts and field types, and ownership rules. Compatible additions use a
@@ -62,6 +62,7 @@ The CLI names `bnb` and `bnbopt` select defaults O1 and O2 for this same engine.
 
 Recompile clients and update their option construction. Python/Ruby bindings
 verify major version 2 before accessing any layouts. Problem/solution layouts,
-ownership, status values, reference float semantics, and PBQP 1 text format are
-unchanged. See the [programmer's guide](programmers_guide.md) for map examples and
+ownership, status values, and reference float semantics are unchanged. Reading
+remains compatible with PBQP 1; writing now uses compact PBQP 2 with shared
+dense/sparse matrices. See the [programmer's guide](programmers_guide.md) for map examples and
 [optimization profiles](bnbopts.md#optimization-profiles-and-overrides) for CLI controls.
