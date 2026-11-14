@@ -45,10 +45,22 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/llvm-21.list
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang-21 clang-tools-21 clang-format-21 libclang-rt-21-dev cmake ninja-build libtbb-dev python3 ruby doxygen
+            clang-21 clang-tools-21 clang-format-21 libclang-rt-21-dev cmake ninja-build libtbb-dev python3 doxygen
           clang++-21 --version
           clang-format-21 --version
           cmake --version
+
+      - name: Set up Ruby
+        if: matrix.build_type == 'Release'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+
+      - name: Check Ruby and Fiddle
+        if: matrix.build_type == 'Release'
+        run: |
+          ruby --version
+          ruby -rfiddle/import -e 'puts "Fiddle available"'
 
       - name: Configure
         run: >-

@@ -38,13 +38,19 @@ def mock_problem(address, frees)
 end
 
 def abandoned_aliases(address, frees, frozen)
-  original = mock_problem(address, frees)
-  original.freeze if frozen
-  copy = original.dup
-  cloned = original.clone
-  references = [WeakRef.new(original), WeakRef.new(copy), WeakRef.new(cloned)]
-  original = copy = cloned = nil
-  references
+  # MRI conservatively scans native stacks: a returned method can leave stale
+  # temporary pointers which keep wrappers alive despite clearing Ruby locals.
+  # Create wrappers on a separate fiber so the caller's native stack never
+  # contains those pointers when it requests collection.
+  Fiber.new do
+    original = mock_problem(address, frees)
+    original.freeze if frozen
+    copy = original.dup
+    cloned = original.clone
+    references = [WeakRef.new(original), WeakRef.new(copy), WeakRef.new(cloned)]
+    original = copy = cloned = nil
+    references
+  end.resume
 end
 
 [false, true].each_with_index do |frozen, index|

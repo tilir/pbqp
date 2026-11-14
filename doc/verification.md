@@ -15,7 +15,9 @@ The targets are available only when CMake finds `clang-format-21`.
 It uses Ubuntu 24.04, the official LLVM apt repository, Clang 21, Ninja, and
 packaged oneTBB.
 The Release job checks formatting and uses a shared library to exercise C, C++,
-Python, and Ruby programming examples and binding tests. The sanitizer job uses
+Python, and Ruby programming examples and binding tests. Release CI selects
+Ruby 3.4 with `ruby/setup-ruby`, checks Fiddle availability, and logs the runtime
+version instead of relying on Ubuntu's default Ruby. The sanitizer job uses
 a static library and exercises native examples. Both jobs build and
 run CTest, including the C interoperability test. Sanitizer errors fail CI,
 and leak checking remains enabled on GitHub's runner.
@@ -186,6 +188,10 @@ with `PBQP_BUILD_EXAMPLES=ON` also exercise Python/Ruby clients and bindings
 when their interpreters are present; see the [programmer's guide](programmers_guide.md).
 Ruby ownership regressions use mock deleters for dup/clone/freeze, alias closure,
 and GC to avoid making a double-free regression crash the test runner.
+Create abandoned aliases in a separate, completed fiber: MRI's conservative
+native-stack scan can otherwise retain stale temporary pointers after a helper
+returns, making an immediate weak-reference assertion depend on the interpreter
+build. Keep the collection and exactly-once deallocation checks intact.
 
 The private optimized-bound checks retain all original-order completion oracles.
 The production maximal catalogue and test-only all-subset reference are compared
