@@ -56,7 +56,9 @@ public:
     // of feasible must distinguish that valid incumbent from no solution.
     feasible.store(true, std::memory_order_release);
   }
+  // Assignment access is valid before dispatch or after all workers join.
   pbqp_solution &result() noexcept { return *solution; }
+  const pbqp_solution &result() const noexcept { return *solution; }
   pbqp_solution *release_solution() noexcept { return solution.release(); }
 };
 } // namespace pbqp

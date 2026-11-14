@@ -41,6 +41,36 @@ module PBQP
     # Ruby pack's Q/L directives use native byte order and fixed 64/32-bit widths.
     raise LoadError, 'unsupported size_t width' unless [4, 8].include?(Fiddle::SIZEOF_SIZE_T)
     SIZE_T_FORMAT = Fiddle::SIZEOF_SIZE_T == 8 ? 'Q' : 'L'
+
+    # Public Problem wrappers can be copied or frozen. Only this shared mutable
+    # handle owns disposal state and a finalizer, so aliases never own a second
+    # native destructor and freezing a wrapper cannot prevent closing it.
+    class ProblemHandle
+      def self.finalizer(api, pointer)
+        proc { api.pbqp_problem_free(pointer) }
+      end
+
+      def initialize(api, pointer)
+        @api = api
+        @pointer = pointer
+        ObjectSpace.define_finalizer(self, self.class.finalizer(api, pointer))
+      end
+
+      def pointer
+        raise IOError, 'PBQP problem is closed' unless @pointer
+
+        @pointer
+      end
+
+      def close
+        pointer = @pointer
+        return unless pointer
+
+        @pointer = nil
+        ObjectSpace.undefine_finalizer(self)
+        @api.pbqp_problem_free(pointer)
+      end
+    end
   end
 
   class Error < StandardError
@@ -103,23 +133,15 @@ module PBQP
   end
 
   class Problem
-    def self.finalizer(api, pointer)
-      proc { api.pbqp_problem_free(pointer) }
-    end
-
     def initialize(api, pointer)
       @api = api
-      @pointer = pointer
-      ObjectSpace.define_finalizer(self, self.class.finalizer(api, pointer))
+      @handle = Native::ProblemHandle.new(api, pointer)
     end
 
-    # Do not close while another thread is using this object.
+    # Copies share one handle: closing any alias closes all of them. A frozen
+    # wrapper may also close safely. Do not close during another operation.
     def close
-      return unless @pointer
-
-      @api.pbqp_problem_free(@pointer)
-      ObjectSpace.undefine_finalizer(self)
-      @pointer = nil
+      @handle.close
     end
 
     def write(path)
@@ -174,9 +196,7 @@ module PBQP
     private
 
     def require_open
-      raise IOError, 'PBQP problem is closed' unless @pointer
-
-      @pointer
+      @handle.pointer
     end
   end
 end

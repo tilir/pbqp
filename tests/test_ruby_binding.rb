@@ -4,6 +4,7 @@
 
 require 'pbqp'
 require 'tmpdir'
+require 'weakref'
 
 abort 'expected LIBRARY INPUT' unless ARGV.size == 2
 
@@ -19,6 +20,71 @@ def expect_error(type)
   end
   raise "expected #{type}"
 end
+
+# Fake pointers make ownership failures safe: the mock records deallocations
+# without passing sentinel addresses to the actual native allocator.
+class MockApi
+  def initialize(frees)
+    @frees = frees
+  end
+
+  def pbqp_problem_free(pointer)
+    @frees << pointer.to_i
+  end
+end
+
+def mock_problem(address, frees)
+  PBQP::Problem.new(MockApi.new(frees), Fiddle::Pointer.new(address))
+end
+
+def abandoned_aliases(address, frees, frozen)
+  original = mock_problem(address, frees)
+  original.freeze if frozen
+  copy = original.dup
+  cloned = original.clone
+  references = [WeakRef.new(original), WeakRef.new(copy), WeakRef.new(cloned)]
+  original = copy = cloned = nil
+  references
+end
+
+[false, true].each_with_index do |frozen, index|
+  frees = []
+  address = index + 1
+  original = mock_problem(address, frees)
+  original.freeze if frozen
+  copies = [original.dup, original.clone]
+  copies.first.freeze
+  check(original.frozen? == frozen && copies.last.frozen? == frozen)
+  copies.last.close
+  [original, *copies].each do |problem|
+    problem.close
+    expect_error(IOError) { problem.solve }
+    expect_error(IOError) { problem.write('unused.pbqp') }
+  end
+  check(frees == [address])
+  copies = original = nil
+  3.times { GC.start }
+  check(frees == [address])
+
+  frees = []
+  references = abandoned_aliases(address, frees, frozen)
+  3.times { GC.start }
+  check(references.none?(&:weakref_alive?))
+  check(frees == [address])
+end
+
+# Collecting one alias must not finalize the handle retained by another.
+frees = []
+original = mock_problem(3, frees)
+copy = original.dup
+original = nil
+3.times { GC.start }
+check(frees.empty?)
+copy.close
+check(frees == [3])
+copy = nil
+3.times { GC.start }
+check(frees == [3])
 
 library = PBQP::Library.new(ARGV[0])
 check(library.version == [1, 0, 0])

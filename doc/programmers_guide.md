@@ -180,7 +180,11 @@ puts solution.cost
 ```
 
 Block-form `read` closes the problem even when the block raises. Without a block,
-call `close` explicitly; a finalizer handles abandoned objects. Returned solution
+call `close` explicitly; a finalizer handles abandoned objects. `dup` and `clone`
+share one mutable native handle. Closing any alias closes every alias, and later
+operations raise `IOError`. Freezing a public wrapper does not prevent safe,
+idempotent closure. Only the shared handle owns finalization, so collecting one
+wrapper cannot free storage still referenced by another. Returned solution
 records and option arrays are frozen Ruby-owned copies and outlive the native
 problem. `PBQP::Error` exposes integer `status` and `line`; the `Status`, `Solver`,
 and `Quality` modules define the corresponding C API values. Invalid Ruby options

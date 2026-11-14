@@ -296,7 +296,7 @@ void test_optimized_regalloc() {
   verify(impossible, 4, false, true);
 
   // Four odd cycles need at least one spill each with two registers. Cliques
-  // have size two, so this keeps the root bound loose and exercises workers
+  // have size two; the maximal-set catalogue restores a tight global bound
   // without an expensive exhaustive oracle or a wall-clock assertion.
   std::vector<pbqp_node> cycles(20, pbqp_node{3, unary});
   std::vector<pbqp_edge> cycle_edges;
@@ -314,8 +314,8 @@ void test_optimized_regalloc() {
   pbqp_solution *raw = nullptr;
   check(pbqp_solve_branch_and_bound_optimized(&odd_cycles, &configuration, &raw,
                                               nullptr) == PBQP_OK);
-  check(diagnostics.find("set count budget reached") != std::string::npos);
-  check(diagnostics.find("partial results discarded") != std::string::npos);
+  check(diagnostics.find("independent sets complete: count=625") !=
+        std::string::npos);
   check(diagnostics.find("structural path enabled") != std::string::npos);
   SolutionPtr solution(raw);
   check(solution->quality == PBQP_SOLUTION_OPTIMAL && solution->cost == 4);

@@ -95,12 +95,8 @@ public:
   }
   void prepare_search() { structure.prepare(); }
   void prepare_capacity(Diagnostics log = {}) {
-    if (!structure.ready()) {
-      log.line(
-          "bnbopt: capacity preparation skipped: structural path unavailable");
+    if (!structure.ready())
       return;
-    }
-    log.line("bnbopt: preparing independent-set and capacity bounds");
     independent.prepare(structure.adjacency());
     pricing.prepare(input(), independent);
     describe_bnbopt_capacity(input(), independent, pricing, log);
@@ -235,6 +231,9 @@ bool OptimizedBranchAndBoundBounds::capacity_bound(
     return true;
   for (size_t color = 0; color < registers(); ++color) {
     size_t best = 0;
+    // Every independent extension lies in a maximal independent superset.
+    // Intersecting with allowed pending nodes preserves that extension, and
+    // nonnegative unit/auxiliary weights make its capacity no smaller.
     for (const auto &pattern : independent) {
       if (color < workspace.colored.size() &&
           !workspace.colored[color].is_subset_of(pattern))

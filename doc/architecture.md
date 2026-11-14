@@ -35,9 +35,22 @@ while B&B shares an any-optimum incumbent.
 
 `BitSet<Word = unsigned>` owns reusable word-vector storage. Its unsigned word
 type is independent of bit count. Generic `IndependentSets` accepts adjacency
-bitsets; verified register structure and interpreting sets as register classes
-belong to `bnbopt`. Pricing is also solver-specific and supplies integer
-constraints to the reference-order cost DP.
+bitsets and enumerates maximal sets directly; verified register structure and
+interpreting sets as register classes belong to `bnbopt`. A bounded all-subset reference lives only in private tests
+for differential checks and historical budget regressions. Pricing is also
+solver-specific and supplies integer constraints to the reference-order cost DP.
+
+## Shared B&B engine and baseline bounds
+
+`src/solvers/bnb` contains both the baseline bounds strategy (`bnb_bounds.cppm`)
+and the engine reused by `bnbopt`. `branch_and_bound.cppm` orchestrates root
+checks, heuristic seeding, planning, workers, and result ownership. The planner,
+queue, worker, and incumbent partitions operate on a supplied bounds strategy;
+they do not embed the optimized graph/capacity model. `src/solvers/bnbopt`
+provides that model. Generic prefix/progress/TBB services used by both naive and
+B&B remain in `src/search`. This split is intentional; another strategy may
+justify extracting the shared engine later, but a directory move is not required
+for baseline and optimized search to share it today.
 
 B&B's work queue owns prepared prefix slots and selects cached lower bounds.
 Workers donate sibling ranges only between DFS chunks and remove those ranges
@@ -60,5 +73,6 @@ bridge lets the ordinary test executable invoke these checks without exposing
 internal types or extending the C API. Production builds with testing disabled
 do not include the bridge.
 
-See [AGENTS.md](../AGENTS.md) for development rules and [solvers.md](solvers.md)
+See [verification.md](verification.md) for coverage and measurement commands,
+[AGENTS.md](../AGENTS.md) for development rules and [solvers.md](solvers.md)
 for algorithm, numerical, and progress contracts.

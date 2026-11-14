@@ -10,9 +10,9 @@
 module;
 #include "pbqp.h"
 #include <cstddef>
+#include <vector>
 module pbqp:bnbopt_diagnostics;
 import :diagnostics;
-import :bitset;
 import :bnb_bounds;
 import :bnbopt_structure;
 import :independent_sets;
@@ -23,8 +23,6 @@ void describe_bnbopt_input(const pbqp_problem &p,
                            const RegallocStructure &graph, Diagnostics log) {
   if (!log)
     return;
-  log.line("bnbopt: dynamic bitsets; word bits=", BitSet<>::word_bits,
-           "; no fixed 64-node or 64-register limit");
   log.line(
       "bnbopt: graph limits: storage bytes=", RegallocStructure::memory_budget,
       "; ranking words=", RegallocStructure::word_budget,
@@ -44,9 +42,7 @@ void describe_bnbopt_input(const pbqp_problem &p,
   case InterferenceFailure::None:
     log.line("bnbopt: input shape=pure interference; registers=",
              p.nodes[0].num_options - 1);
-    if (graph.eligible())
-      log.line("bnbopt: structural path available");
-    else
+    if (!graph.eligible())
       log.line("bnbopt: structural path unavailable: graph storage budget "
                "exceeded; using generic PBQP bounds");
     break;
@@ -81,13 +77,8 @@ void describe_bnbopt_input(const pbqp_problem &p,
 
 void describe_bnbopt_structure(const RegallocStructure &graph,
                                Diagnostics log) {
-  if (!log)
+  if (!log || !graph.ready())
     return;
-  if (!graph.ready()) {
-    log.line(
-        "bnbopt: structural preparation skipped; generic PBQP bounds retained");
-    return;
-  }
   log.line("bnbopt: structural path enabled: forward checking, clique bounds, "
            "clique-first order");
   log.line("bnbopt: clique preparation: greedy starts=",
@@ -115,6 +106,7 @@ void describe_bnbopt_capacity(const pbqp_problem &problem,
   case IndependentSetStatus::Complete:
     log.line("bnbopt: independent sets complete: count=", sets.size(),
              "; maximum size=", sets.maximum_size(),
+             "; word work=", sets.work_used(),
              "; global cardinality capacity enabled");
     break;
   case IndependentSetStatus::MemoryBudget:

@@ -23,6 +23,7 @@ module;
 
 module pbqp;
 import :branch_and_bound;
+import :diagnostics;
 import :problem;
 import :search_tasks;
 import :bnb_work_queue;
@@ -39,6 +40,52 @@ void check(bool condition,
   if (!condition)
     throw std::runtime_error(std::string(location.file_name()) + ":" +
                              std::to_string(location.line()));
+}
+
+void test_preliminary_bounds() {
+  pbqp::AdaptivePlan plan;
+  plan.tasks.resize(2);
+  plan.tasks[0].bound = 7;
+  plan.tasks[1].bound = 9;
+  pbqp::BranchAndBoundIncumbent incumbent(1);
+  auto describe = [](const pbqp::AdaptivePlan &frontier,
+                     const pbqp::BranchAndBoundIncumbent &best) {
+    std::string message;
+    auto record = [](const char *text, void *data) noexcept {
+      *static_cast<std::string *>(data) = text;
+    };
+    pbqp::describe_preliminary_bounds(frontier, best,
+                                      pbqp::Diagnostics(record, &message));
+    return message;
+  };
+  check(describe(plan, incumbent) ==
+        "search: preliminary bounds: lower=7; upper=none (no "
+        "feasible solution yet)");
+  const size_t option = 0;
+  incumbent.update(&option, 11);
+  check(describe(plan, incumbent) ==
+        "search: preliminary bounds: lower=7; upper=11");
+  incumbent.update(&option, 5);
+  // All remaining cached bounds exceed the incumbent; the global optimum is
+  // bounded by the incumbent too, rather than by the frontier alone.
+  check(describe(plan, incumbent) ==
+        "search: preliminary bounds: lower=5; upper=5");
+  plan.tasks.clear();
+  check(describe(plan, incumbent) ==
+        "search: preliminary bounds: lower=5; upper=5");
+
+  pbqp::AdaptivePlan empty;
+  pbqp::BranchAndBoundIncumbent unknown(1), infinite(1);
+  check(describe(empty, unknown) == "search: preliminary bounds: infeasible");
+  infinite.update(&option, PBQP_INF);
+  check(describe(empty, infinite) ==
+        "search: preliminary bounds: lower=inf; upper=inf");
+  empty.tasks.resize(1);
+  empty.tasks[0].bound = -PBQP_INF;
+  check(describe(empty, unknown) == "search: preliminary bounds: lower=-inf; "
+                                    "upper=none (no feasible solution yet)");
+  check(describe(empty, infinite) ==
+        "search: preliminary bounds: lower=-inf; upper=inf");
 }
 
 void test_singleton_frontier() {
@@ -239,5 +286,6 @@ extern "C++" void run_search_internal_tests() {
   test_runtime_donation();
   test_singleton_frontier();
   test_root_seed_policy();
+  test_preliminary_bounds();
 }
 } // namespace pbqp

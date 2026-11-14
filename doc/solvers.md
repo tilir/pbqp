@@ -237,8 +237,14 @@ estimate. The final solution still uses the shared original-order evaluator.
 
 ### Global register-capacity bounds
 
-`IndependentSets` in `core` enumerates nonempty independent sets of a simple
-undirected graph, independently of PBQP or register allocation. Preparation is
+`IndependentSets` in `core` enumerates maximal independent sets of a simple
+undirected graph, independently of PBQP or register allocation. All-subset
+enumeration exists only as a bounded test reference, not a production mode.
+Capacity uses maximal sets by inclusion, not just maximum-cardinality sets.
+Every fixed independent class and extension lies inside a maximal set; filtering
+that set by allowed pending nodes preserves the extension. With nonnegative
+capacity weights, the maximum is unchanged. Original signed spill costs are
+handled separately by the cost DP. Preparation is
 iterative, with a 16 MiB auxiliary-storage budget, at most 10,000 sets, and an
 8-million-word work budget. Exhaustion discards partial results. Only a complete
 enumeration can upper-bound register capacity; finding some sets is insufficient.
@@ -252,7 +258,7 @@ original-order DP enforces this global spill-count constraint.
 For finite nonnegative spill costs, bounded projected accelerated gradient may
 also choose auxiliary integer weights. Double arithmetic selects these weights
 only; it never supplies a pruning score. For each register, the actual maximum
-remaining auxiliary weight is recomputed over all independent sets. Any weight
+remaining auxiliary weight is recomputed over the complete maximal catalogue. Any weight
 not accommodated by those capacities must spill. A capped-weight DP enforces
 this condition while adding original float costs in original node order, with
 reachability separate from infinite scores.
@@ -261,7 +267,8 @@ Pricing uses four temperatures and at most 2,000 iterations, with a bounded
 pattern-vertex visit estimate. Nonpositive heuristic scores or unsupported costs
 disable pricing without affecting feasibility. Quantization and scaling bound
 total auxiliary weight to 32,768 and the worst-case weighted DP scan to roughly
-four million state slots. Integer sums are checked against those budgets before
+four million state slots. Round auxiliary weights to nearest integers, reserving
+half a unit per node when scaling to fit the budget; check the final sum. Integer sums are checked against those budgets before
 conversion or allocation. Negative/INF spill costs retain valid unweighted and
 clique bounds. Cheap root/seed and structural proofs precede the extra work.
 No external LP library is required.
@@ -279,12 +286,24 @@ input dimensions, requested thread limit, heartbeat setting, and returned result
 quality to stderr. The normal COST/NODE records on stdout are unchanged.
 
 For `bnbopt`, it also reports cached eligibility and preparation decisions:
-input-shape mismatches with node/edge entries, dynamic-bitset support without a
-64-node/register limit, graph and clique budgets, retained witnesses, independent
+input-shape mismatches with node/edge entries, graph and clique budgets,
+retained witnesses, independent
 set completion or discarded partial results, weighted-pricing eligibility,
 iteration/visit/state budgets, weight scaling, and planned/prepared workers.
 An early root proof explicitly explains why later preparation was unnecessary.
 A limit on one component does not disable unrelated valid optimizations.
+
+Before DFS, both `bnb` and `bnbopt` print `search: preliminary bounds: lower=...;
+upper=...`. The lower estimate is the minimum cached bound of remaining prefix
+jobs, capped by the incumbent cost; the upper estimate is the cost of an actual
+feasible assignment from seeding or planning. Parent bounds for unchecked ranges
+can make the estimate conservative. Closed prefixes are infeasible, exhausted,
+or no better than the current incumbent. With no remaining jobs, a feasible
+incumbent proves equality of the bounds; without one, preparation has proved
+infeasibility. If work remains but no assignment is known, `upper=none (no
+feasible solution yet)` is distinct from a feasible overflowed `upper=inf`.
+The message precedes all DFS/progress callbacks and uses reference-order float
+costs, not the pricing stage's real-arithmetic objective or a time estimate.
 
 Library callers can request the same `bnbopt` messages through
 `pbqp_solve_branch_and_bound_optimized`, using the `diagnostics` and

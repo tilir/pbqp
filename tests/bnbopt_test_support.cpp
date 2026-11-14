@@ -12,6 +12,7 @@
 module;
 #include "pbqp.h"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <concepts>
@@ -25,6 +26,7 @@ module;
 #include <random>
 #include <ranges>
 #include <source_location>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -301,8 +303,6 @@ void test_storage_budget_fallback() {
   DiagnosticLog log;
   bounds.describe_input(pbqp::Diagnostics(record_diagnostic, &log));
   check(log.text.find("graph storage budget exceeded") != std::string::npos);
-  check(log.text.find("no fixed 64-node or 64-register limit") !=
-        std::string::npos);
   check(&bounds.domains() == &problem);
   pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
   pbqp_cost_t lower;
@@ -413,6 +413,39 @@ static_assert(
     std::same_as<std::ranges::range_reference_t<pbqp::IndependentSets>,
                  const pbqp::BitSet<> &>);
 
+// Test-only historical reference: enumerate all nonempty independent subsets
+// by recursive extension. Its cap reproduces the old catalogue limitation;
+// production retains only a maximal catalogue. Keep this independent of the
+// pivoted Bron-Kerbosch implementation being checked.
+struct IndependentSubsetReference {
+  std::vector<pbqp::BitSet<>> sets;
+  bool complete = true;
+};
+IndependentSubsetReference
+independent_subsets(std::span<const pbqp::BitSet<>> adjacency) {
+  constexpr size_t legacy_subset_limit = 10000;
+  IndependentSubsetReference result;
+  pbqp::BitSet<> current(adjacency.size());
+  std::function<bool(size_t)> enumerate = [&](size_t first) {
+    for (size_t node = first; node < adjacency.size(); ++node) {
+      if (adjacency[node].intersects(current))
+        continue;
+      if (result.sets.size() == legacy_subset_limit)
+        return false;
+      current.set(node);
+      result.sets.push_back(current);
+      if (!enumerate(node + 1))
+        return false;
+      current.reset(node);
+    }
+    return true;
+  };
+  result.complete = enumerate(0);
+  if (!result.complete)
+    result.sets.clear();
+  return result;
+}
+
 void test_independent_sets() {
   std::mt19937 random(29);
   for (size_t count = 0; count <= 8; ++count)
@@ -425,9 +458,8 @@ void test_independent_sets() {
             graph[src].set(tgt);
             graph[tgt].set(src);
           }
-      pbqp::IndependentSets sets;
-      sets.prepare(graph);
-      check(sets.complete());
+      const auto reference = independent_subsets(graph);
+      check(reference.complete);
       std::vector<size_t> expected, actual;
       for (size_t mask = 1; mask < (size_t{1} << count); ++mask) {
         bool independent = true;
@@ -439,7 +471,7 @@ void test_independent_sets() {
         if (independent)
           expected.push_back(mask);
       }
-      for (const auto &set : sets) {
+      for (const auto &set : reference.sets) {
         size_t mask = 0;
         for (size_t id = set.first(); id < count; id = set.next(id))
           mask |= size_t{1} << id;
@@ -447,16 +479,245 @@ void test_independent_sets() {
       }
       std::sort(actual.begin(), actual.end());
       check(actual == expected);
-      check(sets.size() == expected.size() && sets.empty() == expected.empty());
-      check(static_cast<size_t>(std::ranges::distance(sets)) == sets.size());
+      check(reference.sets.size() == expected.size());
     }
   std::vector<pbqp::BitSet<>> empty_edges(65, pbqp::BitSet<>(65));
-  pbqp::IndependentSets incomplete;
-  incomplete.prepare(empty_edges);
-  check(!incomplete.complete() && incomplete.empty());
-  check(incomplete.status() == pbqp::IndependentSetStatus::SetBudget);
-  check(incomplete.num_examined() == 10000);
-  check(incomplete.num_entries() == 0 && incomplete.maximum_size() == 0);
+  const auto incomplete = independent_subsets(empty_edges);
+  check(!incomplete.complete && incomplete.sets.empty());
+}
+
+size_t pattern_mask(const pbqp::BitSet<> &set) {
+  size_t mask = 0;
+  for (size_t id = set.first(); id < set.size(); id = set.next(id))
+    mask |= size_t{1} << id;
+  return mask;
+}
+
+// Compare the per-register relaxation on every fixed independent class and
+// every remaining allowed mask. Costs never enter this nonnegative capacity.
+void compare_capacities(std::span<const pbqp::BitSet<>> all,
+                        const pbqp::IndependentSets &maximal, size_t count) {
+  constexpr size_t weight_period = 3;
+  constexpr size_t emphasized_node = 1;
+  constexpr size_t emphasized_weight = 20;
+  auto make_weights = [count](auto weight) {
+    std::vector<size_t> values(count);
+    for (size_t id = 0; id < count; ++id)
+      values[id] = weight(id);
+    return values;
+  };
+  const std::vector<size_t> unit_weights(count, 1), zero_weights(count, 0);
+  const auto periodic_weights =
+      make_weights([](size_t id) { return id % weight_period; });
+  const auto quadratic_weights =
+      make_weights([](size_t id) { return 1 + id * id; });
+  const auto emphasized_weights = make_weights(
+      [](size_t id) { return id == emphasized_node ? emphasized_weight : 1; });
+  const std::array<std::span<const size_t>, 5> weight_sets{
+      unit_weights, periodic_weights, quadratic_weights, zero_weights,
+      emphasized_weights};
+
+  const size_t full = (size_t{1} << count) - 1;
+  const std::span<const pbqp::BitSet<>> maximal_sets(maximal);
+  auto capacity = [](std::span<const pbqp::BitSet<>> sets, size_t fixed,
+                     size_t allowed, std::span<const size_t> weights) {
+    size_t best = 0;
+    for (const auto &set : sets) {
+      const size_t mask = pattern_mask(set);
+      if ((mask & fixed) != fixed)
+        continue;
+      size_t score = 0;
+      for (size_t id = 0; id < weights.size(); ++id)
+        if ((mask & allowed) & (size_t{1} << id))
+          score += weights[id];
+      best = std::max(best, score);
+    }
+    return best;
+  };
+  for (size_t fixed = 0; fixed <= full; ++fixed) {
+    if (fixed && std::none_of(all.begin(), all.end(), [&](const auto &set) {
+          return pattern_mask(set) == fixed;
+        }))
+      continue;
+    size_t pending = full ^ fixed;
+    for (size_t allowed = pending;; allowed = (allowed - 1) & pending) {
+      for (const auto weights : weight_sets)
+        check(capacity(all, fixed, allowed, weights) ==
+              capacity(maximal_sets, fixed, allowed, weights));
+      if (!allowed)
+        break;
+    }
+  }
+}
+
+void test_maximal_sets() {
+  std::mt19937 random(731);
+  for (size_t count = 0; count <= 8; ++count)
+    for (size_t trial = 0; trial < 20; ++trial) {
+      context = "maximal independent sets n=" + std::to_string(count) +
+                " trial=" + std::to_string(trial);
+      std::vector<pbqp::BitSet<>> graph(count, pbqp::BitSet<>(count));
+      for (size_t src = 0; src < count; ++src)
+        for (size_t tgt = src + 1; tgt < count; ++tgt)
+          // Include isolated, complete, disconnected, and mixed-density graphs.
+          if (trial == 1 || (trial > 2 && random() % 3 == 0 &&
+                             (trial != 3 || src / 3 == tgt / 3))) {
+            graph[src].set(tgt);
+            graph[tgt].set(src);
+          }
+      const auto all = independent_subsets(graph);
+      pbqp::IndependentSets maximal;
+      maximal.prepare(graph);
+      check(all.complete && maximal.complete());
+      std::vector<size_t> expected, actual;
+      for (size_t mask = 1; mask < (size_t{1} << count); ++mask) {
+        bool independent = true, is_maximal = true;
+        for (size_t id = 0; id < count; ++id) {
+          bool has_neighbor = false;
+          for (size_t other = 0; other < count; ++other)
+            has_neighbor |=
+                (mask & (size_t{1} << other)) && graph[id].test(other);
+          if (mask & (size_t{1} << id))
+            independent &= !has_neighbor;
+          else
+            is_maximal &= has_neighbor;
+        }
+        if (independent && is_maximal)
+          expected.push_back(mask);
+      }
+      size_t entries = 0;
+      for (const auto &set : maximal) {
+        actual.push_back(pattern_mask(set));
+        entries += set.count();
+      }
+      std::sort(actual.begin(), actual.end());
+      check(actual == expected && maximal.num_entries() == entries);
+      size_t maximum_size = 0;
+      for (const auto &set : all.sets)
+        maximum_size = std::max(maximum_size, set.count());
+      check(maximal.maximum_size() == maximum_size);
+      if (count <= 5)
+        compare_capacities(all.sets, maximal, count);
+    }
+  // Maximal is not maximum-cardinality: the center of a path is a valid
+  // singleton maximal set and can be the best set for nonnegative weights.
+  std::vector<pbqp::BitSet<>> path(3, pbqp::BitSet<>(3));
+  path[0].set(1);
+  path[1].set(0);
+  path[1].set(2);
+  path[2].set(1);
+  pbqp::IndependentSets sets;
+  sets.prepare(path);
+  check(sets.size() == 2);
+  check(std::any_of(sets.begin(), sets.end(),
+                    [](const auto &set) { return pattern_mask(set) == 2; }));
+  const auto all = independent_subsets(path);
+  check(all.complete && all.sets.size() == 4);
+
+  std::vector<pbqp::BitSet<>> isolated(129, pbqp::BitSet<>(129));
+  pbqp::IndependentSets spanning;
+  spanning.prepare(isolated);
+  check(spanning.complete() && spanning.size() == 1);
+  check(spanning.maximum_size() == isolated.size());
+}
+
+void test_maximal_bipartite_bound() {
+  for (size_t side : {6u, 12u, 13u, 16u}) {
+    context = "maximal bipartite side=" + std::to_string(side);
+    pbqp_cost_t unary[] = {1, 0}, matrix[] = {0, 0, 0, PBQP_INF};
+    std::vector<pbqp_node> nodes(side * 2, pbqp_node{2, unary});
+    std::vector<pbqp_edge> edges;
+    std::vector<pbqp::BitSet<>> graph(nodes.size(),
+                                      pbqp::BitSet<>(nodes.size()));
+    for (size_t src = 0; src < side; ++src)
+      for (size_t tgt = side; tgt < nodes.size(); ++tgt) {
+        edges.push_back({src, tgt, matrix});
+        graph[src].set(tgt);
+        graph[tgt].set(src);
+      }
+    const auto all = independent_subsets(graph);
+    check(all.complete == (side <= 12));
+    pbqp_problem problem{nodes.size(), edges.size(), nodes.data(),
+                         edges.data()};
+    pbqp::OptimizedBranchAndBoundBounds bounds(problem);
+    bounds.prepare_search();
+    bounds.prepare_capacity();
+    check(bounds.patterns().complete() && bounds.patterns().size() == 2);
+    check(bounds.patterns().maximum_size() == side);
+    pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
+    pbqp_cost_t lower = 0;
+    check(bounds.lower_bound(nullptr, 0, workspace, lower));
+    check(lower == side);
+  }
+}
+
+void test_maximal_budgets() {
+  context = "maximal independent set-count budget";
+  constexpr size_t count = 27;
+  pbqp_cost_t unary[] = {1, 0}, matrix[] = {0, 0, 0, PBQP_INF};
+  std::vector<pbqp_node> nodes(count, pbqp_node{2, unary});
+  std::vector<pbqp_edge> edges;
+  for (size_t group = 0; group < count; group += 3)
+    for (size_t src = group; src < group + 3; ++src)
+      for (size_t tgt = src + 1; tgt < group + 3; ++tgt)
+        edges.push_back({src, tgt, matrix});
+  pbqp_problem problem{nodes.size(), edges.size(), nodes.data(), edges.data()};
+  pbqp::OptimizedBranchAndBoundBounds bounds(problem);
+  bounds.prepare_search();
+  DiagnosticLog log;
+  bounds.prepare_capacity(pbqp::Diagnostics(record_diagnostic, &log));
+  check(bounds.patterns().status() == pbqp::IndependentSetStatus::SetBudget);
+  check(bounds.patterns().num_examined() == 10000 && bounds.patterns().empty());
+  check(bounds.patterns().num_entries() == 0 &&
+        bounds.patterns().maximum_size() == 0);
+  check(bounds.weights().status() == pbqp::PricingStatus::IncompleteSets);
+  check(log.text.find("partial results discarded") != std::string::npos);
+  pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
+  pbqp_cost_t lower = 0;
+  check(bounds.lower_bound(nullptr, 0, workspace, lower));
+  check(lower == 2); // Clique-only relaxation; known optimum is 18 spills.
+
+  for (size_t count : {1000u, 10000u}) {
+    context = "maximal preparation budget n=" + std::to_string(count);
+    std::vector<pbqp::BitSet<>> graph(count, pbqp::BitSet<>(count));
+    pbqp::IndependentSets sets;
+    sets.prepare(graph);
+    check(!sets.complete() && sets.empty() && sets.num_entries() == 0);
+    check(sets.status() == (count == 1000
+                                ? pbqp::IndependentSetStatus::WordBudget
+                                : pbqp::IndependentSetStatus::MemoryBudget));
+    check(sets.work_used() <= pbqp::IndependentSets::word_budget);
+  }
+}
+
+void test_price_quantization() {
+  context = "nearest auxiliary price quantization";
+  const std::vector<double> prices{0.124999, 0.125, 0.125001,
+                                   0.374999, 0.375, 0.375001};
+  auto rounded = pbqp::quantize_prices(prices, 32768);
+  check(rounded.status == pbqp::PricingStatus::Enabled && rounded.scale == 4);
+  check(rounded.weights == std::vector<size_t>({0, 1, 1, 1, 2, 2}));
+  auto bounded = pbqp::quantize_prices({1e300, 1e300, 1e300}, 32768);
+  check(bounded.status == pbqp::PricingStatus::Enabled);
+  check(bounded.total > 0 && bounded.total <= 32768 && bounded.scale < 4);
+  for (size_t id = 0; id < bounded.weights.size(); ++id)
+    check(std::abs(bounded.weights[id] - 1e300 * bounded.scale) <= 0.5);
+  for (size_t limit : {size_t{0}, size_t{1}, size_t{32769}}) {
+    auto rejected = pbqp::quantize_prices({1, 1, 1}, limit);
+    check(rejected.status == pbqp::PricingStatus::StateBudget);
+    check(!rejected.total && rejected.weights.empty());
+  }
+  for (auto value : {-1.0, std::numeric_limits<double>::infinity(),
+                     std::numeric_limits<double>::quiet_NaN()}) {
+    auto rejected = pbqp::quantize_prices({value, 1}, 32768);
+    check(rejected.status == pbqp::PricingStatus::NonFinite);
+    check(!rejected.total && rejected.weights.empty());
+  }
+  check(pbqp::quantize_prices({0, 0}, 32768).status ==
+        pbqp::PricingStatus::ZeroWeights);
+  const auto maximum = std::numeric_limits<double>::max();
+  check(pbqp::quantize_prices({maximum, maximum}, 32768).status ==
+        pbqp::PricingStatus::NonFinite);
 }
 
 void test_pricing_limits() {
@@ -563,7 +824,11 @@ namespace pbqp {
 extern "C++" void run_bnbopt_internal_tests() {
   test_coalescing_fallback();
   test_independent_sets();
+  test_maximal_sets();
+  test_maximal_bipartite_bound();
+  test_maximal_budgets();
   test_pricing_limits();
+  test_price_quantization();
   test_bitsets<unsigned char>();
   test_bitsets<unsigned short>();
   test_bitsets<unsigned>();

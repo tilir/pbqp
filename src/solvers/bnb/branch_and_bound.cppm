@@ -10,6 +10,7 @@
  */
 module;
 #include "pbqp.h"
+#include <algorithm>
 #include <memory>
 #include <vector>
 module pbqp:branch_and_bound;
@@ -26,6 +27,33 @@ import :greedy;
 import :reduction;
 import :diagnostics;
 namespace pbqp {
+// Called only after preparation, before workers start. Cached frontier bounds
+// cover every remaining subtree, including unchecked child ranges. Closed
+// prefixes are infeasible, exhausted, or no better than the current incumbent.
+// Capping the frontier minimum by a feasible incumbent therefore bounds the
+// global optimum, rather than only the best remaining unexplored assignment.
+void describe_preliminary_bounds(const AdaptivePlan &plan,
+                                 const BranchAndBoundIncumbent &incumbent,
+                                 Diagnostics log) {
+  if (!log)
+    return;
+  if (plan.tasks.empty() && !incumbent.found()) {
+    log.line("search: preliminary bounds: infeasible");
+    return;
+  }
+  pbqp_cost_t lower = PBQP_INF;
+  for (const auto &prefix : plan.tasks)
+    lower = std::min(lower, prefix.bound);
+  if (incumbent.found()) {
+    const auto upper = incumbent.result().cost;
+    lower = std::min(lower, upper);
+    log.line("search: preliminary bounds: lower=", lower, "; upper=", upper);
+  } else {
+    log.line("search: preliminary bounds: lower=", lower,
+             "; upper=none (no feasible solution yet)");
+  }
+}
+
 template <typename Bounds = BranchAndBoundBounds> class BranchAndBoundSearch {
 public:
   struct SeedStatistics {
@@ -177,6 +205,7 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare() {
     if (progress)
       progress_workers.emplace_back(*progress);
   }
+  describe_preliminary_bounds(plan, incumbent, diagnostics);
 }
 
 template <typename Bounds>
