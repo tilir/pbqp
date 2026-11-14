@@ -41,6 +41,7 @@ struct PrefixTask {
   std::vector<size_t> ranks;
   size_t child_begin = 0;
   size_t child_end = 0;
+  double progress_weight = 0;
 };
 struct PrefixPlan {
   std::vector<PrefixTask> tasks;

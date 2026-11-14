@@ -62,8 +62,9 @@ public:
 
 /** C++ callbacks are captured and safely bridged by solve(). */
 struct SolveOptions {
-  std::size_t num_threads = 1;            ///< Positive concurrency limit.
-  std::function<void(unsigned)> progress; ///< Optional exact-space progress.
+  std::size_t num_threads = 1; ///< Positive concurrency limit.
+  std::function<void(unsigned)>
+      progress; ///< Optional progress (approximate for B&B).
   std::function<void(std::string_view)>
       diagnostics; ///< Borrowed preparation text.
 };

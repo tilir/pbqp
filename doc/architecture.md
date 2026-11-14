@@ -27,8 +27,10 @@ in a GCC module partition.
 `core` and shared `search` must not import concrete solvers. The B&B orchestrator
 may invoke greedy and reduction for incumbent seeds; its bounds and workers do
 not depend on either heuristic. Shared mechanisms include prefix descriptors,
-dispatch, progress, and reference evaluation. Baseline and optimized B&B share
-identical worker/control semantics through a bounds-strategy template, with
+dispatch, exact naive progress, and reference evaluation. B&B owns approximate
+surviving-tree progress, including cached child lookahead and donated subtree
+weights. Baseline and optimized B&B share identical worker/control semantics
+through a bounds-strategy template, with
 original-ID assignments and ordered search positions. Winner selection stays
 specific to the algorithm: naive preserves the first lexicographic minimum,
 while B&B shares an any-optimum incumbent.
@@ -47,8 +49,10 @@ and the engine reused by `bnbopt`. `branch_and_bound.cppm` orchestrates root
 checks, heuristic seeding, planning, workers, and result ownership. The planner,
 queue, worker, and incumbent partitions operate on a supplied bounds strategy;
 they do not embed the optimized graph/capacity model. `src/solvers/bnbopt`
-provides that model. Generic prefix/progress/TBB services used by both naive and
-B&B remain in `src/search`. This split is intentional; another strategy may
+provides that model. Generic prefix descriptors and TBB services remain in
+`src/search`, together with naive's exact progress counters. B&B's approximate
+progress reporter lives in `bnb_progress.cppm`. This split is intentional;
+another strategy may
 justify extracting the shared engine later, but a directory move is not required
 for baseline and optimized search to share it today.
 

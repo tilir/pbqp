@@ -9,6 +9,7 @@ set(PBQP_COMPONENT_MODULES
   bnb_work_queue.cppm
   bnb_tasks.cppm
   bnb_worker.cppm
+  bnb_progress.cppm
 )
 list(TRANSFORM PBQP_COMPONENT_MODULES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 list(APPEND PBQP_LIBRARY_MODULES ${PBQP_COMPONENT_MODULES})

@@ -208,3 +208,12 @@ Preliminary-bound diagnostics cover the minimum remaining frontier, capping by
 an improved incumbent, closed optimal/infeasible roots, absence of an incumbent,
 and feasible infinite costs. CLI coverage checks that the interval precedes
 heartbeat output and leaves solution stdout unchanged.
+
+B&B heartbeat regressions use synthetic wide domains with 98% immediate
+infeasibility or bound cuts. Check that these cuts do not advance progress,
+child bounds are evaluated once, small DFS quanta can pause child lookahead,
+and actual sibling donation conserves completed plus discarded weight.
+Completion is reserved until the search joins, including empty incoming jobs.
+Retain naive's independent exact mixed-radix threshold tests. Example 10 is a
+manual long-running heartbeat check; do not exhaust it in ordinary CTest or
+assert timing thresholds for its dots.

@@ -54,6 +54,7 @@ class CoarseWorkQueue {
     std::vector<size_t> ranks;
     size_t length = 0, begin = 0, end = 0, sequence = 0;
     pbqp_cost_t bound = 0;
+    double progress_weight = 0;
     explicit Slot(size_t nodes) : ranks(nodes) {}
   };
   std::vector<Slot> slots;
@@ -68,7 +69,7 @@ class CoarseWorkQueue {
                             slots[a].sequence);
   }
   void insert(const size_t *ranks, size_t length, size_t begin, size_t end,
-              pbqp_cost_t bound) noexcept {
+              pbqp_cost_t bound, double progress_weight) noexcept {
     size_t index = free_slots.back();
     free_slots.pop_back();
     auto &s = slots[index];
@@ -77,6 +78,7 @@ class CoarseWorkQueue {
     s.begin = begin;
     s.end = end;
     s.bound = bound;
+    s.progress_weight = progress_weight;
     s.sequence = sequence++;
     heap.push_back(index);
     std::push_heap(heap.begin(), heap.end(),
@@ -91,6 +93,7 @@ class CoarseWorkQueue {
     task.ranks.assign(s.ranks.begin(), s.ranks.begin() + s.length);
     task.child_begin = s.begin;
     task.child_end = s.end;
+    task.progress_weight = s.progress_weight;
     bound = s.bound;
     free_slots.push_back(index);
     ++active;
@@ -112,7 +115,7 @@ public:
     }
     for (const auto &p : plan.tasks)
       insert(p.task.ranks.data(), p.task.ranks.size(), p.task.child_begin,
-             p.task.child_end, p.bound);
+             p.task.child_end, p.bound, p.task.progress_weight);
   }
   bool wants_work() const noexcept {
     // No data is published by this hint. Stale reads merely delay donation;
@@ -150,11 +153,11 @@ public:
       changed.notify_all();
   }
   bool donate(const size_t *ranks, size_t length, size_t begin, size_t end,
-              pbqp_cost_t bound) {
+              pbqp_cost_t bound, double progress_weight = 0) {
     std::scoped_lock lock(mutex);
     if (cancelled() || free_slots.empty())
       return false;
-    insert(ranks, length, begin, end, bound);
+    insert(ranks, length, begin, end, bound, progress_weight);
     changed.notify_one();
     return true;
   }

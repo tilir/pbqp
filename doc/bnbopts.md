@@ -1,8 +1,8 @@
 # Optimizations in bnbopt
 
 `bnbopt` is an exact solver built on the same search engine as `bnb`. It retains
-the C API contracts, any-optimum tie policy, thread limit, and covered-space
-heartbeat. Both solvers report costs using unary terms in original node-ID
+the C API contracts, any-optimum tie policy, thread limit, and approximate
+search-tree heartbeat. Both solvers report costs using unary terms in original node-ID
 order, followed by edge terms in stored order. Neither proves optimality for
 a regrouped real-arithmetic objective.
 
@@ -22,7 +22,7 @@ a graph algorithm could theoretically be reused elsewhere:
 | --- | --- |
 | Reference-order evaluation; unary/row/matrix minima; general matrix-based forward checking | Generic, shared by `bnb` and the `bnbopt` fallback. |
 | Cheap root checks and greedy/reduction incumbents | Generic, shared by both solvers. |
-| Prefix planning, cached-bound priorities, resumable DFS, sibling donation, oneTBB dispatch, and covered-space progress | Generic search machinery, shared by both solvers; the supplied bounds strategy determines its estimates. |
+| Prefix planning, cached-bound priorities, resumable DFS, sibling donation, oneTBB dispatch, and approximate search-tree progress | Generic search machinery, shared by both solvers; the supplied bounds strategy determines its estimates. |
 | Canonical register naming | Model-dependent and shared; requires verified interchangeable registers, not prepared clique/capacity data. |
 | Clique discovery and both structural tail orderings (section 2) | Structural path only. Clique discovery remains inside this path. |
 | Register-mask forward checking and clique spill-count DP (section 3) | Structural path only. A clique of arbitrary PBQP edges does not imply distinct registers. |
@@ -528,8 +528,8 @@ per-register capacities on every small fixed-class/allowed-mask combination,
 and bounds against independent exhaustive completion of canonical prefixes. They
 cover signed and fractional costs, explicit INF, cancellation, reachable
 infinite accumulated costs, auxiliary-weight scaling, and fallback behavior.
-Parallel tests cover actual sibling donation, exact serialized progress, and
-queue cancellation on dispatcher failure. Public tests retain independent
+Parallel tests cover actual sibling donation, serialized progress, weight
+conservation, and queue cancellation on dispatcher failure. Public tests retain independent
 assignment evaluation, input ownership, C compatibility, and heuristic quality.
 
 ## Reproduce performance measurements

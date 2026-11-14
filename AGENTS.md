@@ -141,11 +141,14 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
 - Comment every explicit non-sequential atomic memory order with its publication
   pairing or why no publication is needed. Stale bounds/hints may cause extra
   work, never incorrect pruning. Join all workers before returning.
-- Progress counts exact covered space, including forbidden tuples and pruned
-  subtrees. Preserve mixed-radix thresholds for totals beyond machine integers.
-  Serialize callbacks and batch merges; never lock progress per tuple/closure.
-  No early/zero-percent notification or callback outliving the call. Preparation
-  failures emit no progress. Keep naive's no-progress observer compiled away.
+- Naive progress counts every tuple exactly, with mixed-radix thresholds even
+  beyond machine integers. B&B progress is approximate: distribute subtree
+  weights among children surviving lookahead, cache their bounds, exclude
+  immediate cuts and empty incoming jobs, and transfer weights on donation.
+  Reserve B&B's 100 until workers join. Serialize callbacks and batch merges;
+  never lock progress per tuple/closure. No zero-percent notification or callback
+  outliving the call. Preparation failures emit no progress. Keep the
+  no-progress path free of lookahead storage and progress accounting.
 
 ## CLI, documentation, and verification
 
@@ -166,7 +169,8 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
   symbol reference. Keep integration examples in the programmer's guide.
 - Run relevant existing tests and required format/doc checks. Checks stay active
   in Release. Preserve independent final-tuple and canonical-prefix oracles,
-  ownership/C ABI/binding regressions, exact progress and queue cancellation tests.
+  ownership/C ABI/binding regressions, exact naive/approximate B&B progress,
+  and queue cancellation tests.
   Do not weaken an oracle by making it reuse the algorithm under test.
 - Keep timing thresholds out of CTest and enormous exact fixture solves out of
   routine tests. Measure speed with Google Benchmark Release builds and real-time

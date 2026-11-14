@@ -2,7 +2,8 @@
  * Synchronous exact-search orchestration with budgeted coarse work sharing.
  * Preparation owns immutable bounds, private DFS workspaces, and a bounded
  * priority queue. oneTBB consumers donate siblings to waiting consumers only
- * between DFS chunks. Progress counts each closed prefix exactly once.
+ * between DFS chunks. Approximate progress weights only branches surviving
+ * immediate cuts.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  * Distributed under GNU GPL version 3, WITHOUT ANY WARRANTY.
@@ -19,7 +20,7 @@ import :bnb_incumbent;
 import :bnb_work_queue;
 import :bnb_worker;
 import :bnb_tasks;
-import :search_progress;
+import :bnb_progress;
 import :parallel;
 import :error;
 import :evaluation;
@@ -71,8 +72,8 @@ private:
   std::vector<BranchAndBoundWorker<Bounds>> workers;
   pbqp_progress_callback callback;
   void *user_data;
-  std::unique_ptr<SubtreeProgress> progress;
-  std::vector<SubtreeProgress::Accumulator> progress_workers;
+  std::unique_ptr<BranchAndBoundProgress> progress;
+  std::vector<BranchAndBoundProgress::Accumulator> progress_workers;
   SeedStatistics seeds;
 
   void seed_incumbent(pbqp_cost_t root_bound);
@@ -82,7 +83,7 @@ private:
     if (progress)
       progress_workers[index].flush();
   }
-  template <typename Observer> void consume(size_t index, Observer observe) {
+  template <typename Observer> void consume(size_t index, Observer &&observe) {
     auto &worker = workers[index];
     pbqp_cost_t bound;
     while (queue->take(worker.task, bound)) {
@@ -190,8 +191,12 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare_plan() {
 template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare() {
   prepare_plan();
   if (callback)
-    progress = std::make_unique<SubtreeProgress>(bounds.domains(), callback,
-                                                 user_data);
+    progress = std::make_unique<BranchAndBoundProgress>(callback, user_data);
+  if (progress && !plan.tasks.empty()) {
+    const double weight = 1.0 / plan.tasks.size();
+    for (auto &prefix : plan.tasks)
+      prefix.task.progress_weight = weight;
+  }
   size_t count = plan.tasks.empty() ? 0 : num_threads;
   queue = std::make_unique<CoarseWorkQueue>(
       count ? bounds.input().num_nodes : 0, count, plan);
@@ -201,7 +206,7 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare() {
   if (progress)
     progress_workers.reserve(count);
   for (size_t id = 0; id < count; ++id) {
-    workers.emplace_back(bounds, incumbent);
+    workers.emplace_back(bounds, incumbent, bool(progress));
     if (progress)
       progress_workers.emplace_back(*progress);
   }
@@ -210,27 +215,27 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare() {
 
 template <typename Bounds>
 pbqp_status BranchAndBoundSearch<Bounds>::run(pbqp_error *error) {
-  if (progress)
-    for (size_t depth : plan.covered_depths)
-      progress->completed_prefix(depth);
   run_parallel(
       workers.size(),
       [&](size_t id) {
         if (progress)
-          consume(id, [&](size_t depth) noexcept {
-            progress_workers[id].completed_prefix(depth);
-          });
+          consume(id, progress_workers[id]);
         else
           consume(id, [](size_t) noexcept {});
       },
       [&]() noexcept { queue->cancel(); });
-  if (!incumbent.found())
+  if (!incumbent.found()) {
+    if (progress)
+      progress->finish();
     return set_error(error, PBQP_INFEASIBLE, 0, "no feasible tuple");
+  }
   auto &solution = incumbent.result();
   if (!evaluate_assignment(bounds.input(), solution.options, solution.cost))
     return set_error(error, PBQP_INVALID, 0,
                      "branch-and-bound produced a forbidden assignment");
   solution.quality = PBQP_SOLUTION_OPTIMAL;
+  if (progress)
+    progress->finish();
   return PBQP_OK;
 }
 } // namespace pbqp

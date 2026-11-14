@@ -235,14 +235,15 @@ void pbqp_problem_free(pbqp_problem *problem);
  */
 void pbqp_solution_free(pbqp_solution *solution);
 
-/** Called synchronously after each completed integer percentage, from 1
- * through 100, at most once per percentage. Several percentages may complete
- * on one tuple or pruned subtree. user_data is borrowed for the call.
- * Notifications are serialized and may run on TBB workers during a parallel
- * call. Workers may merge counts in batches: notifications can lag completed
- * work, but never precede their exact thresholds. All completed percentages
- * are reported before return. A callback must not throw or modify the problem
- * or its arrays. */
+/** Called synchronously with increasing integer percentages, from 1 through
+ * 100, at most once per percentage. Naive reports exact visited-tuple
+ * percentages; B&B reports an approximate fraction of the surviving search
+ * tree, excluding immediate cuts. Neither is an elapsed-time estimate.
+ * Several percentages may be reported together. user_data is borrowed for
+ * the call. Notifications are serialized and may run on TBB workers during a
+ * parallel call. Workers may batch updates. Successful exhaustion or a proof
+ * of infeasibility reports 100; B&B reserves 100 until all workers have joined.
+ * A callback must not throw or modify the problem or its arrays. */
 typedef void (*pbqp_progress_callback)(unsigned percent, void *user_data);
 
 /** Optional human-readable preparation diagnostics. Each message is a borrowed
@@ -328,12 +329,17 @@ pbqp_status pbqp_solve_bruteforce(const pbqp_problem *problem,
  * PBQP_SOLUTION_OPTIMAL; PBQP_INFEASIBLE requires an exhaustive proof.
  * NULL options select one thread without progress or diagnostics. Otherwise,
  * options control concurrency and optional progress/preparation callbacks.
- * Progress counts tuples in searched or pruned subtrees and obeys the exact
- * serialized percentage contract above. Success and infeasibility proofs report
- * 100; errors before search invoke no progress callbacks. Diagnostics describe
- * planning and worker preparation on the calling thread, outside DFS.
+ * Progress approximates the fraction of the surviving search tree. Immediate
+ * infeasibility, symmetry, and bound cuts receive no child weight; remaining
+ * children share their parent's weight. Initial frontier jobs have equal
+ * weights; jobs closed on arrival are excluded. Subtrees can require unequal
+ * work, so percentages can pause or advance abruptly and are not an ETA.
+ * Notifications obey the serialized callback contract above. Success and
+ * infeasibility proofs report 100; errors before search invoke no progress
+ * callbacks. Diagnostics describe planning and worker preparation on the
+ * calling thread, outside DFS.
  * Workspaces are private to workers; only immutable input/minima, a
- * synchronized incumbent, and covered-space reporting are shared. All work and
+ * synchronized incumbent, and progress reporting are shared. All work and
  * callbacks complete before return. Runtime/scheduler exceptions become
  * PBQP_INTERNAL_ERROR; allocation failures remain PBQP_NO_MEMORY. */
 pbqp_status pbqp_solve_branch_and_bound(const pbqp_problem *problem,
@@ -350,7 +356,7 @@ pbqp_status pbqp_solve_branch_and_bound(const pbqp_problem *problem,
  * may depend on scheduling. No external mathematical-programming library is
  * required.
  * NULL options select one thread without progress or diagnostics. Otherwise,
- * options control concurrency, serialized covered-space progress, and optional
+ * options control concurrency, approximate search-tree progress, and optional
  * preparation diagnostics explaining input eligibility, enabled optimizations,
  * budgets, fallbacks, and worker/planning parameters. The progress and
  * diagnostic callback contracts above apply, with independent contexts. All

@@ -56,7 +56,7 @@ The sole C entry point `pbqp_solve_bruteforce` accepts shared
 `pbqp_solve_options` (thread limit, progress and diagnostic callbacks with
 independent contexts). NULL options select the direct single-thread path
 without callbacks. Parallel progress counts
-all visited tuples using the same exact covered-space accumulator as B&B.
+all visited tuples using an exact mixed-radix covered-space accumulator.
 
 ## Branch-and-bound
 
@@ -76,7 +76,7 @@ heuristics. Otherwise greedy supplies a cheap initial incumbent; if its cost
 matches the root lower bound, the optimum is already proved. Reduction runs
 only when a better incumbent can still matter, avoiding unnecessary cubic R2
 work and fill allocations on trivially solved inputs. Both root proofs retain
-full covered-space progress, reported after successful preparation.
+a final completion notification, reported after successful preparation.
 
 Greedy and reduction supply initial feasible incumbents. Failure of either
 heuristic supplies no bound and never proves infeasibility. Improvements are
@@ -120,7 +120,8 @@ may exceed the deadline. Both frontier expansion and queued-job selection prefer
 lower conditioned bounds, with insertion order breaking ties. Domains determine
 prefix depth; unchecked siblings become range jobs on budget exhaustion. Forced
 single-option runs are appended in place and checked once. Closed planning
-prefixes are retained as deferred progress events.
+prefixes remain available as preparation statistics; they do not advance the
+B&B heartbeat.
 
 Workers keep private resumable DFS state and run chunks of at most 512 bound
 checks. If another consumer is waiting, a worker can donate an unexplored sibling
@@ -172,7 +173,7 @@ pbqp --solve=bnbopt --numthreads=4 --heartbeat \
 ```
 
 `bnbopt` is a separate exact solver with the same C contracts, any-optimum tie
-policy, thread limit, and covered-space heartbeat as `bnb`. The baseline retains
+policy, thread limit, and approximate search-tree heartbeat as `bnb`. The baseline retains
 its original ID order and independent-term bounds for comparison. Both strategies
 share the worker DFS, incumbent, prefix planner, TBB dispatcher, and progress
 mechanisms through one bounds-strategy template; naive's different winner
@@ -389,23 +390,59 @@ search. Neither heuristic is guaranteed to dominate the other on all inputs.
 
 ## Heartbeat
 
-`--heartbeat` is supported by `naive` and `bnb`. It writes at most 100 flushed
-dots to stderr, one per completed integer percentage, with a final newline.
-Solution records remain on stdout. No dot is emitted at zero progress.
+`--heartbeat` is supported by `naive`, `bnb`, and `bnbopt`. It writes at most
+100 flushed dots to stderr, with a final newline. Solution records remain on
+stdout. No dot is emitted at zero progress. Percentages describe search progress,
+not elapsed time or an ETA.
 
-Naive counts visited tuples; its parallel callbacks are serialized too.
-Branch-and-bound adds the sizes of completely
-searched or pruned prefix subtrees, including symmetry cuts. Subtrees may close
-out of order, so coverage uses mixed-radix addition rather than a lexicographic
-frontier. Workers accumulate coverage privately and merge at job completion,
-after 256 small closed prefixes, or immediately for a cut covering at least
-one percent of the space. This keeps the progress mutex out of most search
-steps. Batches preserve exact mixed-radix counts: notifications can lag completed
-work but never report an unfinished percentage. Worker tails are flushed before
-return, including on an infeasibility proof.
-Callbacks are serialized and may run on a TBB worker; no callback
-outlives the synchronous solver call. A cut subtree may therefore
-advance several dots immediately. This measures search-space coverage, not
-elapsed time or an ETA. Percentages remain valid when the product of domain
-sizes exceeds fixed-width integer ranges. Even an infeasibility proof reports
-complete progress; errors before search do not report progress.
+### Naive: exact tuple counts
+
+Naive counts every visited tuple, including forbidden assignments. Integer
+percentage `p` is reached after `ceil(total * p / 100)` visits. Parallel workers
+accumulate mixed-radix covered-space counts privately and merge at job completion,
+after 256 small closures, or immediately for a one-percent-sized closure.
+This preserves exact thresholds even when the product of domain sizes exceeds
+machine integers. Batched notifications may lag visits but cannot precede their
+thresholds. The single-thread path keeps its direct lexicographic counter.
+
+### B&B: an estimate over surviving branches
+
+The original Cartesian space is a poor denominator for B&B. For example,
+register-label symmetry can immediately discard most of that space, while the
+remaining canonical assignments still require a long proof. A strong bound can
+have the same effect. Counting those cuts as completed tuples makes the bar
+almost full before the difficult work begins.
+
+With heartbeat enabled, each worker performs one-level lookahead before
+entering a node's children. It checks each child's bound and keeps only children
+which are feasible under the constraints and can still improve the incumbent.
+Infeasible children, noncanonical register names, and immediate `L >= G` cuts
+receive no weight. The node's weight is divided equally among surviving children,
+rather than among every original option. If no child survives, the searched node
+closes with its whole weight. Child bounds are cached: entering a surviving child
+rechecks the latest incumbent, without evaluating that bound again.
+
+The surviving initial frontier jobs start with equal weights; prefixes already
+closed during planning contribute nothing. An initial or donated job rejected
+on arrival (including a range with no surviving children) is removed from the
+denominator, as is a cached child closed on entry by a newer incumbent.
+Donation transfers the unexplored siblings' weights to the receiving
+worker and removes those siblings from the donor. Completed weights are merged
+in batches of 256 closures or immediately for a weight of at least 0.01.
+
+These are **approximate percentages**, not a count of all DFS nodes or a promise
+that equal percentages take equal time. Children and frontier jobs may contain
+very different amounts of work. New incumbents can close branches which survived
+an earlier check. Percentages are monotone but can pause or jump; rounding and
+very small weights can also defer notifications. The final dot is reserved until
+all workers have joined. Empty searches and root proofs still report 1 through
+100 after successful preparation.
+
+Lookahead has private preallocated child-bound caches and is resumable within
+the usual DFS quantum. It introduces no search-loop allocations. Without a
+progress callback, B&B uses the ordinary DFS without these caches or lookahead;
+naive's algorithm and exact progress are unchanged.
+
+All callbacks are serialized and may run on TBB workers. Worker tails are flushed
+before return. No callback outlives the synchronous solver call. An infeasibility
+proof reports completion too; errors before search emit no progress.
