@@ -12,9 +12,11 @@
 module;
 #include "pbqp.h"
 #include <algorithm>
+#include <atomic>
 #include <memory>
 #include <vector>
 module pbqp:branch_and_bound;
+import :deadline;
 import :bnb_term_bounds;
 import :bnb_options;
 import :bnb_incumbent;
@@ -66,6 +68,8 @@ public:
   };
 
 private:
+  Deadline deadline;
+  std::atomic<bool> interrupted{false};
   BnbOptions optimizations;
   Bounds bounds;
   BranchAndBoundIncumbent incumbent;
@@ -86,6 +90,11 @@ private:
   bool prepare_capacity_bounds(pbqp_cost_t &lower);
   void prepare_plan();
 
+  size_t dfs_quantum() const noexcept {
+    return deadline.enabled() ? BranchAndBoundSettings::timed_quantum
+                              : BranchAndBoundSettings::quantum;
+  }
+
   void finish(size_t index) {
     queue->completed();
     if (progress)
@@ -96,9 +105,20 @@ private:
     auto &worker = workers[index];
     pbqp_cost_t bound;
     while (queue->take(worker.task, bound)) {
+      if (deadline.expired()) {
+        interrupted.store(true);
+        queue->cancel();
+        break;
+      }
       worker.start(bound);
       while (!queue->cancelled()) {
-        if (worker.chunk(BranchAndBoundSettings::quantum, observe)) {
+        if (deadline.expired()) {
+          interrupted.store(true);
+          queue->cancel();
+          break;
+        }
+        // Timed calls use smaller chunks to limit cooperative stop latency.
+        if (worker.chunk(dfs_quantum(), observe)) {
           finish(index);
           break;
         }
@@ -107,16 +127,20 @@ private:
           worker.share(*queue);
       }
     }
+    if (progress)
+      progress_workers[index].flush();
   }
 
 public:
   BranchAndBoundSearch(const pbqp_problem &p, size_t threads,
                        pbqp_progress_callback cb, void *data,
                        Diagnostics log = {},
-                       BnbOptions options = Bounds::default_options())
-      : optimizations(options), bounds(p, options), incumbent(p.num_nodes),
-        requested_threads(threads), num_threads(parallel_concurrency(threads)),
-        diagnostics(log), settings(num_threads), callback(cb), user_data(data) {
+                       BnbOptions options = Bounds::default_options(),
+                       Deadline limit = Deadline{})
+      : deadline(limit), optimizations(options), bounds(p, options),
+        incumbent(p.num_nodes), requested_threads(threads),
+        num_threads(parallel_concurrency(threads)), diagnostics(log),
+        settings(num_threads), callback(cb), user_data(data) {
     if (!optimizations.enabled(BnbOptimization::PrefixPlanning))
       settings.jobs = 1;
   }
@@ -137,17 +161,20 @@ void BranchAndBoundSearch<Bounds>::seed_incumbent(pbqp_cost_t root_bound) {
   if (optimizations.enabled(BnbOptimization::GreedySeed)) {
     seeds.greedy = true;
     GreedySearch greedy(problem);
-    if (greedy.prepare(nullptr) == PBQP_OK && greedy.run(nullptr) == PBQP_OK) {
+    if (greedy.prepare(nullptr) == PBQP_OK &&
+        greedy.run(nullptr, deadline) == PBQP_OK) {
       const auto &seed = greedy.get_solution();
       incumbent.update(seed.options, seed.cost);
     }
   }
-  if (!incumbent.can_improve(root_bound) ||
+  if (deadline.expired() || !incumbent.can_improve(root_bound) ||
       !optimizations.enabled(BnbOptimization::ReductionSeed))
     return;
   seeds.reduction = true;
   ReductionSearch reduction(problem);
-  reduction.prepare();
+  reduction.prepare(deadline);
+  if (deadline.expired())
+    return;
   if (reduction.run(nullptr) == PBQP_OK) {
     const auto &seed = reduction.get_solution();
     incumbent.update(seed.options, seed.cost);
@@ -166,7 +193,10 @@ void BranchAndBoundSearch<Bounds>::seed_cover(pbqp_cost_t root_bound) {
                      "; pattern-vertex work=", RegisterCoverSeed::work_budget,
                      "; pair candidates=", RegisterCoverSeed::pair_candidates);
     RegisterCoverSeed cover(bounds.input(), bounds.patterns());
-    if (!cover.run(root_bound)) {
+    const bool found = cover.run(root_bound, deadline);
+    if (deadline.expired())
+      return;
+    if (!found) {
       if (!cover.enabled())
         diagnostics.line("bnb: catalogue seed disabled: finite nonnegative "
                          "spills required");
@@ -187,7 +217,7 @@ void BranchAndBoundSearch<Bounds>::seed_cover(pbqp_cost_t root_bound) {
 template <typename Bounds>
 bool BranchAndBoundSearch<Bounds>::prepare_capacity_bounds(pbqp_cost_t &lower) {
   if constexpr (requires { bounds.prepare_capacity(); }) {
-    if (!bounds.needs_capacity())
+    if (deadline.expired() || !bounds.needs_capacity())
       return false;
     // Cheap structural bounds may already prove the heuristic seed optimal.
     // Keep expensive complete-pattern enumeration and pricing behind that test.
@@ -199,7 +229,11 @@ bool BranchAndBoundSearch<Bounds>::prepare_capacity_bounds(pbqp_cost_t &lower) {
       plan.covered_depths.push_back(0);
       return true;
     }
-    bounds.prepare_capacity(diagnostics);
+    if (deadline.expired())
+      return false;
+    bounds.prepare_capacity(diagnostics, deadline);
+    if (deadline.expired())
+      return false;
     typename Bounds::Workspace capacity(bounds);
     if (!bounds.lower_bound(nullptr, 0, capacity, lower) ||
         !incumbent.can_improve(lower)) {
@@ -224,9 +258,11 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare_plan() {
       "; planner target jobs=", settings.jobs,
       "; bound-check budget=", BranchAndBoundSettings::planning_calls,
       "; planning time budget ms=", BranchAndBoundSettings::planning_ms,
-      "; DFS quantum=", BranchAndBoundSettings::quantum);
+      "; DFS quantum=", dfs_quantum());
   if constexpr (requires { bounds.describe_input(diagnostics); })
     bounds.describe_input(diagnostics);
+  if (deadline.expired())
+    return;
   typename Bounds::Workspace initial(bounds);
   pbqp_cost_t lower;
   if (!bounds.lower_bound(nullptr, 0, initial, lower)) {
@@ -235,19 +271,28 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare_plan() {
     plan.covered_depths.push_back(0);
     return;
   }
+  if (deadline.expired())
+    return;
   seed_incumbent(lower);
+  if (deadline.expired())
+    return;
   if (!incumbent.can_improve(lower)) {
     diagnostics.line("search: initial bound and heuristic seed prove "
                      "optimality; later preparation unnecessary");
     plan.covered_depths.push_back(0);
     return;
   }
-  bounds.prepare_search();
+  if constexpr (requires { bounds.prepare_search(deadline); })
+    bounds.prepare_search(deadline);
+  else
+    bounds.prepare_search();
+  if (deadline.expired())
+    return;
   if constexpr (requires { bounds.describe_structure(diagnostics); })
     bounds.describe_structure(diagnostics);
-  if (prepare_capacity_bounds(lower))
+  if (prepare_capacity_bounds(lower) || deadline.expired())
     return;
-  PrefixPlanner<Bounds> planner(bounds, incumbent);
+  PrefixPlanner<Bounds> planner(bounds, incumbent, deadline);
   plan = planner.build(settings);
   diagnostics.line("search: planned jobs=", plan.tasks.size(),
                    "; bound checks=", plan.calls,
@@ -261,7 +306,15 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare_plan() {
 }
 
 template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare() {
+  if (deadline.expired()) {
+    interrupted.store(true);
+    return;
+  }
   prepare_plan();
+  if (deadline.expired()) {
+    interrupted.store(true);
+    return;
+  }
   if (callback)
     progress = std::make_unique<BranchAndBoundProgress>(callback, user_data);
   if (progress && !plan.tasks.empty()) {
@@ -278,6 +331,10 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare() {
   if (progress)
     progress_workers.reserve(count);
   for (size_t id = 0; id < count; ++id) {
+    if (deadline.expired()) {
+      interrupted.store(true);
+      return;
+    }
     workers.emplace_back(bounds, incumbent, bool(progress));
     if (progress)
       progress_workers.emplace_back(*progress);
@@ -287,6 +344,8 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare() {
 
 template <typename Bounds>
 pbqp_status BranchAndBoundSearch<Bounds>::run(pbqp_error *error) {
+  if (interrupted.load())
+    return set_error(error, PBQP_TIMEOUT, 0, "exact search timed out");
   run_parallel(
       workers.size(),
       [&](size_t id) {
@@ -296,6 +355,8 @@ pbqp_status BranchAndBoundSearch<Bounds>::run(pbqp_error *error) {
           consume(id, [](size_t) noexcept {});
       },
       [&]() noexcept { queue->cancel(); });
+  if (interrupted.load())
+    return set_error(error, PBQP_TIMEOUT, 0, "exact search timed out");
   if (!incumbent.found()) {
     if (progress)
       progress->finish();

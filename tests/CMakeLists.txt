@@ -4,6 +4,7 @@
 
 set(PBQP_TEST_SOURCES test_pbqp.cpp)
 set(PBQP_PARALLEL_TEST_SOURCES test_parallel_exact.cpp)
+set(PBQP_TIMEOUT_TEST_SOURCES test_timeout.cpp)
 set(PBQP_REDUCTION_TEST_SOURCES test_reduction.cpp)
 set(PBQP_C_API_TEST_SOURCES test_c_api.c)
 set(PBQP_CPP_API_TEST_SOURCES test_cpp_api.cpp)
@@ -13,7 +14,7 @@ set(PBQP_INTERNAL_TEST_SUPPORT search_test_support.cpp bnb_bounds_test_support.c
   bnb_progress_test_support.cpp)
 pbqp_register_format_sources(${PBQP_TEST_SOURCES} ${PBQP_REDUCTION_TEST_SOURCES}
   ${PBQP_C_API_TEST_SOURCES} ${PBQP_CPP_API_TEST_SOURCES}
-  ${PBQP_PARALLEL_TEST_SOURCES}
+  ${PBQP_PARALLEL_TEST_SOURCES} ${PBQP_TIMEOUT_TEST_SOURCES}
   ${PBQP_INTERNAL_TEST_SOURCES} ${PBQP_INTERNAL_TEST_SUPPORT} ${PBQP_GENERATOR_TEST_SUPPORT} solver_profiles.hpp)
 set(PBQP_FORMAT_SOURCES "${PBQP_FORMAT_SOURCES}" PARENT_SCOPE)
 
@@ -33,6 +34,12 @@ target_link_libraries(test_parallel_exact PRIVATE pbqp_generator)
 pbqp_configure_cxx_target(test_parallel_exact PRIVATE)
 add_test(NAME parallel_exact COMMAND test_parallel_exact)
 set_tests_properties(parallel_exact PROPERTIES TIMEOUT 30)
+
+add_executable(test_timeout ${PBQP_TIMEOUT_TEST_SOURCES})
+target_link_libraries(test_timeout PRIVATE pbqp)
+pbqp_configure_cxx_target(test_timeout PRIVATE)
+add_test(NAME timeout COMMAND test_timeout)
+set_tests_properties(timeout PROPERTIES TIMEOUT 30)
 
 add_executable(test_reduction ${PBQP_REDUCTION_TEST_SOURCES})
 target_link_libraries(test_reduction PRIVATE pbqp)

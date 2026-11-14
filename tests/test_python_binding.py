@@ -21,7 +21,7 @@ class BindingTests(unittest.TestCase):
         self.library = Library(LIBRARY)
 
     def test_all_solvers_and_lifetime(self):
-        self.assertEqual(self.library.version, (2, 1, 0))
+        self.assertEqual(self.library.version, (2, 2, 0))
         with self.library.read(EXAMPLE) as problem:
             solutions = []
             for solver in Solver:
@@ -81,6 +81,20 @@ class BindingTests(unittest.TestCase):
             # A map key follows the convenience argument and therefore wins.
             with self.assertRaises(PBQPError):
                 problem.solve(options={"num-threads": 0})
+
+    def test_timeout_and_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "timeout.pbqp"
+            path.write_text("PBQP 1 NODES 65 EDGES 0\n" + "".join(
+                f"NODE {node} 2 0 0\n" for node in range(65)) + "END\n")
+            with self.library.read(path) as problem:
+                with self.assertRaises(PBQPError) as caught:
+                    problem.solve(Solver.NAIVE, num_threads=4,
+                                  options={"timeout-ms": 1})
+                self.assertEqual(caught.exception.status, Status.TIMEOUT)
+                result = problem.solve(Solver.R1R2RN)
+                self.assertEqual(result.quality, Quality.FEASIBLE)
+                self.assertTrue(problem.evaluate(result.options).is_feasible)
 
     def test_roundtrip_and_failures(self):
         with tempfile.TemporaryDirectory() as directory:

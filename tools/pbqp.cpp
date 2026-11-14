@@ -36,13 +36,17 @@ constexpr std::array<std::string_view, 13> optimization_names{
 void help() {
   std::cout
       << "Usage: pbqp --solve=SOLVER [--heartbeat] [--verbose] "
-         "[--numthreads=N] [-O0|-O1|-O2] [-f[no-]NAME] INPUT\n"
+         "[--numthreads=N] [--timeout=SECONDS] [-O0|-O1|-O2] [-f[no-]NAME] "
+         "INPUT\n"
          "       pbqp --help\n\n"
          "  --heartbeat  Print up to 100 dots to stderr.\n"
          "               naive: exact tuple counts.\n"
          "               bnb/bnbopt: approximate tree progress, not an ETA.\n\n"
          "  --numthreads=N  Exact-solver concurrency, positive integer "
          "(default 1).\n\n"
+         "  --timeout=SECONDS  Cooperative exact-solver wall-time limit; 0 "
+         "disables.\n"
+         "                     Up to three decimal places; default 0.\n\n"
          "  --verbose  Report solver parameters and optimization decisions to "
          "stderr.\n\n"
          "  -O0/-O1/-O2  B&B profile: basic/common/structural optimizations.\n"
@@ -63,7 +67,9 @@ void help() {
     std::cout << "  " << name << '\n';
 }
 
-void heartbeat(unsigned percent, void *) noexcept {
+void heartbeat(unsigned percent, void *data) noexcept {
+  auto &pending = *static_cast<bool *>(data);
+  pending = percent != 100;
   std::cerr.put('.');
   if (percent == 100)
     std::cerr.put('\n');
@@ -100,9 +106,40 @@ std::optional<pbqp_solver> solver_kind(std::string_view name) {
   return std::nullopt;
 }
 
+size_t timeout_milliseconds(std::string_view text) {
+  const auto dot = text.find('.');
+  const auto seconds = text.substr(0, dot);
+  const auto fraction =
+      dot == text.npos ? std::string_view{} : text.substr(dot + 1);
+  const auto invalid = []() {
+    throw std::invalid_argument("--timeout requires nonnegative seconds with "
+                                "at most three decimal places");
+  };
+  if (seconds.empty() || (dot != text.npos && fraction.empty()) ||
+      fraction.size() > 3)
+    invalid();
+  size_t whole = 0, part = 0;
+  auto parse = [&](std::string_view value, size_t &out) {
+    auto result =
+        std::from_chars(value.data(), value.data() + value.size(), out);
+    if (result.ec != std::errc{} || result.ptr != value.data() + value.size())
+      invalid();
+  };
+  parse(seconds, whole);
+  if (!fraction.empty()) {
+    parse(fraction, part);
+    for (size_t digits = fraction.size(); digits < 3; ++digits)
+      part *= 10;
+  }
+  if (whole > (std::numeric_limits<size_t>::max() - part) / 1000)
+    invalid();
+  return 1000 * whole + part;
+}
+
 std::optional<SolverOptions> parse_options(int argc, char **argv) {
   try {
-    constexpr std::string_view names[] = {"--solve", "--numthreads"};
+    constexpr std::string_view names[] = {"--solve", "--numthreads",
+                                          "--timeout"};
     std::vector<std::string> spellings;
     for (auto name : optimization_names) {
       spellings.push_back("-f" + std::string(name));
@@ -159,11 +196,15 @@ std::optional<SolverOptions> parse_options(int argc, char **argv) {
         result.entries.push_back(
             pbqp_bool_option(optimization_names[id].data(), enable > disable));
     }
+    if (arguments.has("--timeout"))
+      result.entries.push_back(pbqp_size_option(
+          "timeout-ms", timeout_milliseconds(arguments.require("--timeout"))));
     result.entries.push_back(
         pbqp_bool_option("warnings-as-errors", arguments.has("-Werror")));
     result.entries.push_back(pbqp_diagnostic_option("warnings", diagnostic));
     result.entries.push_back(
         pbqp_size_option("num-threads", result.num_threads));
+    result.entries.push_back(pbqp_pointer_option("progress-data", nullptr));
     result.entries.push_back(pbqp_progress_option(
         "progress", report_progress ? heartbeat : nullptr));
     result.entries.push_back(pbqp_diagnostic_option(
@@ -204,14 +245,19 @@ pbqp_status read_problem(std::string_view path, ProblemPtr &problem,
   return status;
 }
 
-pbqp_status solve_problem(const SolverOptions &options,
-                          const pbqp_problem &problem, SolutionPtr &solution,
-                          pbqp_error &error) {
+pbqp_status solve_problem(SolverOptions &options, const pbqp_problem &problem,
+                          SolutionPtr &solution, pbqp_error &error) {
   pbqp_solution *raw = nullptr;
+  bool pending_heartbeat = false;
+  for (auto &entry : options.entries)
+    if (std::string_view(entry.key) == "progress-data")
+      entry.value.pointer = &pending_heartbeat;
   const pbqp_solve_options config{options.entries.size(),
                                   options.entries.data()};
   auto status = pbqp_solve(options.algorithm, &problem, &config, &raw, &error);
   solution.reset(raw);
+  if (pending_heartbeat)
+    std::cerr.put('\n');
   return status;
 }
 
@@ -224,6 +270,8 @@ int report_error(pbqp_status status, const pbqp_error &error) {
     return 2;
   case PBQP_NO_SOLUTION:
     return 3;
+  case PBQP_TIMEOUT:
+    return 4;
   default:
     return 1;
   }

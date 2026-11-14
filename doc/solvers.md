@@ -462,3 +462,15 @@ naive's algorithm and exact progress are unchanged.
 All callbacks are serialized and may run on TBB workers. Worker tails are flushed
 before return. No callback outlives the synchronous solver call. An infeasibility
 proof reports completion too; errors before search emit no progress.
+
+## Wall-time limits
+
+All exact algorithms and B&B optimization profiles accept the `timeout-ms` SIZE
+option. Zero or omission disables it. The budget includes preparation and runs
+against a monotonic clock shared by all workers. Expiration stops cooperatively,
+joins workers, and returns `PBQP_TIMEOUT` with no solution and no final 100%
+notification. Individual operations and callbacks can overrun the deadline.
+A completed proof may still return OK/OPTIMAL or INFEASIBLE without observing
+expiry. Heuristic fallback is an explicit caller choice; see the
+[programming example](programmers_guide.md#exact-search-timeouts-and-heuristic-fallback).
+The CLI accepts `--timeout=15` in seconds and exits with 4 on timeout.

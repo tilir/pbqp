@@ -3,6 +3,7 @@
 # See LICENSE for the full license text.
 
 set(PBQP_COMPONENT_MODULES
+  deadline.cppm
   bitset.cppm
   independent_sets.cppm
   failure.cppm

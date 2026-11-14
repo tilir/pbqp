@@ -1,6 +1,6 @@
 # Programmer's guide
 
-PBQP provides a stable [C API 2.1](c_api.md), a convenience
+PBQP provides a stable [C API 2.2](c_api.md), a convenience
 [C++ header](../include/pbqp.hpp), and small Python/Ruby bindings. The native
 implementation and module partitions remain private. Runnable programs live in
 [examples/programming](../examples/programming); problem data lives in
@@ -87,7 +87,7 @@ forbidden INF terms from feasible floating-point overflow.
 ## C++: RAII, vectors, spans, and exceptions
 
 Include `pbqp.hpp` and link `pbqp`. There is no public module import requirement.
-The wrapper is header-only and delegates all algorithms to C API 2.1.
+The wrapper is header-only and delegates all algorithms to C API 2.2.
 
 ```cpp
 const auto problem = pbqp::Problem::read("examples/pbqp/01_basic.pbqp");
@@ -253,3 +253,60 @@ progress; adding `-Werror` fails before search. Requested heuristic concurrency
 above one also warns and falls back to one thread. B&B switches passed to other
 algorithms warn as unrecognized solver keys. Mode-inapplicable generator options
 warn and are ignored rather than changing the selected generation family.
+
+## Exact-search timeouts and heuristic fallback
+
+[timeout.c](../examples/programming/timeout.c) demonstrates an O2 B&B call
+with a 15-second wall-time budget and a reduction fallback:
+
+```c
+const pbqp_option entries[] = {
+    pbqp_size_option("optimization-level", 2),
+    pbqp_size_option("timeout-ms", 15000)
+};
+const pbqp_solve_options options = {2, entries};
+pbqp_status status = pbqp_solve(PBQP_SOLVER_BNB, problem, &options,
+                               &solution, &error);
+if (status == PBQP_TIMEOUT)
+    status = pbqp_solve(PBQP_SOLVER_R1R2RN, problem, NULL, &solution, &error);
+```
+
+This feature requires a linked library with C API 2.2 or later; query
+`pbqp_get_api_version` when loading it separately.
+
+The `timeout-ms` SIZE key applies to naive and every B&B profile. Zero or an
+omitted key means unlimited time. The budget uses a monotonic clock and starts
+before input validation/preparation; it includes heuristic seeds, planning,
+worker execution, and callbacks. This is cooperative stopping: an allocation,
+validation pass, individual bound/reduction operation, callback, scheduler work,
+or cleanup can run past the deadline. It does not forcibly interrupt threads.
+All workers and callbacks have finished when the call returns, so the borrowed
+problem is immediately safe to reuse or destroy.
+
+`PBQP_TIMEOUT` returns no solution, even if B&B found a feasible incumbent.
+It neither proves infeasibility nor emits a final 100% progress notification.
+If a solver completes its proof without observing expiration, it can return
+`PBQP_OK`/OPTIMAL or `PBQP_INFEASIBLE`. Handle other failures separately rather
+than interpreting every error as a timeout. Invoke the fallback with its own
+options: heuristics do not support `timeout-ms` and follow the normal
+unknown-option warning policy for that key.
+
+Run the example with its default budget, or override milliseconds for a shorter
+demonstration:
+
+```sh
+./build/pbqp_example_timeout examples/pbqp/09_more_bnbopts.pbqp
+./build/pbqp_example_timeout examples/pbqp/09_more_bnbopts.pbqp 1
+```
+
+The C++ convenience API accepts the same key through
+`options.parameters["timeout-ms"] = std::size_t{15000}`; catch `pbqp::Error`
+and inspect `error.status() == PBQP_TIMEOUT` before retrying with a heuristic.
+Python and Ruby accept `options={"timeout-ms": 15000}` and
+`options: {"timeout-ms" => 15000}`, respectively. Their exception status is
+`Status.TIMEOUT` / `PBQP::Status::TIMEOUT`.
+
+The CLI spelling is `--timeout=15` (seconds, up to three decimal places).
+For example, `pbqp --solve=bnbopt --timeout=0.250 INPUT` requests 250 ms.
+Timeout prints a diagnostic, produces no solution records, and exits with code
+4. Exit codes 0/1/2/3 retain their success/error/infeasible/no-solution meanings.

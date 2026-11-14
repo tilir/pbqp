@@ -5,7 +5,7 @@
  * and edge matrix entries. Missing edges contribute zero; INF forbids a node
  * option or a pair. This header defines the in-memory format, min-plus
  * cost algebra, text I/O, ownership helpers, and exact/heuristic solvers.
- * C API version 2.1 is described in doc/c_api.md. The implementation uses
+ * C API version 2.2 is described in doc/c_api.md. The implementation uses
  * C++23; all public declarations are C-compatible. See doc/format.md for the
  * PBQP 1/2 text formats.
  *
@@ -20,7 +20,7 @@
 #pragma once
 
 /** @file pbqp.h
- * @brief Stable C API 2.1 for PBQP data, file I/O, and solvers.
+ * @brief Stable C API 2.2 for PBQP data, file I/O, and solvers.
  */
 
 /** @mainpage PBQP API reference
@@ -46,7 +46,7 @@ extern "C" {
  * Text-format versions are independent of the C API version. */
 enum {
   PBQP_API_VERSION_MAJOR = 2, /**< Breaking compatibility version. */
-  PBQP_API_VERSION_MINOR = 1, /**< Compatible API additions. */
+  PBQP_API_VERSION_MINOR = 2, /**< Compatible API additions. */
   PBQP_API_VERSION_PATCH = 0  /**< Compatible fixes. */
 };
 
@@ -116,7 +116,10 @@ typedef enum pbqp_status {
   /** Search ended without an assignment or a proof of infeasibility. */
   PBQP_NO_SOLUTION = 6,
   /** Runtime or scheduler failure; no solution is returned. */
-  PBQP_INTERNAL_ERROR = 7
+  PBQP_INTERNAL_ERROR = 7,
+  /** Cooperative wall-time limit reached before a proof. No solution is
+   * returned, including when a feasible incumbent was found. */
+  PBQP_TIMEOUT = 8
 } pbqp_status;
 
 /** Ordinary floating-point addition, with the platform's rounding and
@@ -315,6 +318,19 @@ typedef struct pbqp_option {
  * flag. Warning callbacks have the same synchronous, calling-thread,
  * borrowed-message contract as diagnostics.
  *
+ * Exact-solver keys (naive and all B&B profiles):
+ * - "timeout-ms": SIZE, wall-time budget in milliseconds; default 0 means no
+ *   limit. Starts during option processing, before validation and preparation;
+ *   includes callbacks, planning, and worker execution. A cooperative deadline,
+ *   not a hard real-time guarantee: validation, allocation, individual bound or
+ *   reduction operations, callbacks, scheduler work, and cleanup may overrun
+ * it. Checks between preparation steps and short search batches stop all
+ * workers and join them before returning PBQP_TIMEOUT. No solution is returned
+ * on timeout, even if an incumbent exists; callers may then run a heuristic. A
+ * proof completed without observing expiry still returns OK or INFEASIBLE.
+ *   Timeout never proves infeasibility and does not send a final 100% progress
+ *   notification. Heuristics do not consume this key (normal warning policy).
+ *
  * B&B keys:
  * - "optimization-level": SIZE, 0/1/2, default 1. O0 keeps basic reference-term
  *   B&B bounds. O1 enables all common search improvements; O2 adds structural
@@ -326,8 +342,8 @@ typedef struct pbqp_option {
  *   profile, independent of map order. Repricing additionally requires weighted
  *   bounds. Enabled optimizations still require eligible input and resources.
  *
- * No setting changes correctness, reference float evaluation, or result
- * quality. Disabling forward checking retains mandatory fixed-assignment
+ * Optimization settings preserve correctness, reference float evaluation, and
+ * result quality. Disabling forward checking retains mandatory fixed-assignment
  * conflict checks. Callbacks must not throw or modify borrowed inputs or this
  * map.
  */
@@ -434,7 +450,8 @@ pbqp_status pbqp_solve(pbqp_solver solver, const pbqp_problem *problem,
  * tuple, including forbidden tuples, reaching p after ceil(total * p / 100)
  * visits; errors before enumeration invoke no progress callbacks. All work
  * and callbacks complete before return. Scheduler failures report
- * PBQP_INTERNAL_ERROR. */
+ * PBQP_INTERNAL_ERROR. A timeout-ms budget may instead return PBQP_TIMEOUT
+ * with *out == NULL; partial minima are discarded. */
 pbqp_status pbqp_solve_bruteforce(const pbqp_problem *problem,
                                   const pbqp_solve_options *options,
                                   pbqp_solution **out, pbqp_error *error);
@@ -463,7 +480,8 @@ pbqp_status pbqp_solve_bruteforce(const pbqp_problem *problem,
  * to workers; only immutable input/minima, a synchronized incumbent, and
  * progress reporting are shared. All work and callbacks complete before return.
  * Runtime/scheduler exceptions become PBQP_INTERNAL_ERROR; allocation failures
- * remain PBQP_NO_MEMORY. */
+ * remain PBQP_NO_MEMORY. A timeout-ms budget may return PBQP_TIMEOUT with
+ * *out == NULL instead of a proof; partial incumbents are discarded. */
 pbqp_status pbqp_solve_branch_and_bound(const pbqp_problem *problem,
                                         const pbqp_solve_options *options,
                                         pbqp_solution **out, pbqp_error *error);

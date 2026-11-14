@@ -20,6 +20,7 @@ module;
 
 module pbqp:bnb_structure;
 import :bitset;
+import :deadline;
 
 namespace pbqp {
 class RegallocStructure {
@@ -40,6 +41,7 @@ private:
   }
 
   const pbqp_problem &problem;
+  Deadline deadline;
   bool supported;
   bool prepared = false;
   std::vector<BitSet<>> adjacent;
@@ -69,7 +71,8 @@ public:
 
   RegallocStructure(const RegallocStructure &) = delete;
   RegallocStructure &operator=(const RegallocStructure &) = delete;
-  void prepare(bool find_cliques = true, bool structural_order = true);
+  void prepare(bool find_cliques = true, bool structural_order = true,
+               Deadline limit = Deadline{});
 
   size_t greedy_starts_used() const noexcept { return starts_used; }
 
@@ -129,7 +132,7 @@ size_t RegallocStructure::clique_vertex(const BitSet<> &candidates) noexcept {
   size_t best = candidates.first(), best_degree = 0;
   bool scored = false;
   for (size_t node : candidates) {
-    if (remaining_work < candidates.word_count()) {
+    if (deadline.expired() || remaining_work < candidates.word_count()) {
       remaining_work = 0;
       break;
     }
@@ -150,6 +153,8 @@ void RegallocStructure::greedy_cliques() {
   BitSet<> clique(problem.num_nodes), candidates(problem.num_nodes);
   for (size_t start = 0; start < std::min(problem.num_nodes, greedy_starts);
        ++start) {
+    if (deadline.expired())
+      return;
     ++starts_used;
     clique.clear();
     clique.set(start);
@@ -174,7 +179,7 @@ void RegallocStructure::refine_clique() {
   BitSet<> clique(problem.num_nodes);
   candidates[0].fill();
   size_t depth = 0, steps = 0, best_size = best_clique.count();
-  while (steps < clique_budget && remaining_work) {
+  while (steps < clique_budget && remaining_work && !deadline.expired()) {
     if (depth + candidates[depth].count() <= best_size) {
       if (!depth)
         break;
@@ -237,6 +242,8 @@ void RegallocStructure::prepare_order() {
       break;
     }
     while (remaining.any()) {
+      if (deadline.expired())
+        return;
       size_t best = remaining.first();
       for (size_t node : remaining)
         if (preferred(node, best))
@@ -250,7 +257,9 @@ void RegallocStructure::prepare_order() {
   enumeration = {problem.num_nodes, 0, ordered_nodes.data(), nullptr};
 }
 
-void RegallocStructure::prepare(bool find_cliques, bool structural_order) {
+void RegallocStructure::prepare(bool find_cliques, bool structural_order,
+                                Deadline limit) {
+  deadline = limit;
   if (prepared || !supported)
     return;
   adjacent.assign(problem.num_nodes, BitSet<>(problem.num_nodes));
@@ -265,7 +274,11 @@ void RegallocStructure::prepare(bool find_cliques, bool structural_order) {
   if (find_cliques || structural_order) {
     clique_sets.reserve(std::min(problem.num_nodes, greedy_starts) + 1);
     greedy_cliques();
+    if (deadline.expired())
+      return;
     refine_clique();
+    if (deadline.expired())
+      return;
     clique_sets.push_back(best_clique);
     std::sort(clique_sets.begin(), clique_sets.end());
     clique_sets.erase(std::unique(clique_sets.begin(), clique_sets.end()),
@@ -286,6 +299,7 @@ void RegallocStructure::prepare(bool find_cliques, bool structural_order) {
     std::iota(order.begin(), order.end(), size_t{0});
     enumeration = problem;
   }
-  prepared = true;
+  if (!deadline.expired())
+    prepared = true;
 }
 } // namespace pbqp

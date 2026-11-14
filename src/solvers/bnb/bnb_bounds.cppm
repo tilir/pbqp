@@ -17,6 +17,7 @@ module;
 #include <vector>
 
 module pbqp:bnb_bounds;
+import :deadline;
 import :bitset;
 import :bnb_term_bounds;
 import :bnb_options;
@@ -152,21 +153,26 @@ public:
     describe_bnb_structure(structure, optimizations, log);
   }
 
-  void prepare_search() {
+  void prepare_search(Deadline deadline = Deadline{}) {
     structure.prepare(optimizations.enabled(BnbOptimization::CliqueBounds),
-                      optimizations.enabled(BnbOptimization::StructuralOrder));
+                      optimizations.enabled(BnbOptimization::StructuralOrder),
+                      deadline);
   }
 
   bool needs_capacity() const noexcept {
     return structure.ready() && optimizations.catalogue();
   }
 
-  void prepare_capacity(Diagnostics log = {}) {
+  void prepare_capacity(Diagnostics log = {}, Deadline deadline = Deadline{}) {
     if (!needs_capacity())
       return;
-    independent.prepare(structure.adjacency());
+    independent.prepare(structure.adjacency(), deadline);
+    if (deadline.expired())
+      return;
     if (optimizations.enabled(BnbOptimization::WeightedBounds))
-      pricing.prepare(input(), independent);
+      pricing.prepare(input(), independent, deadline);
+    if (deadline.expired())
+      return;
     if (optimizations.enabled(BnbOptimization::WeightedBounds) &&
         optimizations.enabled(BnbOptimization::Repricing))
       prefix_plan =

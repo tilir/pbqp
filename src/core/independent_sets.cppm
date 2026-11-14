@@ -14,6 +14,7 @@ module;
 #include <vector>
 module pbqp:independent_sets;
 import :bitset;
+import :deadline;
 
 namespace pbqp {
 enum class IndependentSetStatus {
@@ -32,6 +33,7 @@ public:
 
 private:
   class MaximalSearch;
+  Deadline deadline;
   std::vector<BitSet<>> sets;
   size_t entries = 0, maximum = 0, examined = 0, work = 0;
   IndependentSetStatus state = IndependentSetStatus::NotPrepared;
@@ -53,7 +55,8 @@ private:
 public:
   // Rows have matching size, no loops, and symmetric edges. A completed
   // maximal catalogue is reusable for this graph only. Omit the empty set.
-  void prepare(std::span<const BitSet<>> adjacency);
+  void prepare(std::span<const BitSet<>> adjacency,
+               Deadline limit = Deadline{});
 
   bool complete() const noexcept {
     return state == IndependentSetStatus::Complete;
@@ -78,7 +81,9 @@ public:
   size_t maximum_size() const noexcept { return maximum; }
 };
 
-void IndependentSets::prepare(std::span<const BitSet<>> adjacency) {
+void IndependentSets::prepare(std::span<const BitSet<>> adjacency,
+                              Deadline limit) {
+  deadline = limit;
   if (complete())
     return;
   sets = std::vector<BitSet<>>{};
@@ -116,6 +121,8 @@ class IndependentSets::MaximalSearch {
   BitSet<> current;
 
   bool charge(size_t count) noexcept {
+    if (output.deadline.expired())
+      return false;
     if (count > word_budget - output.work) {
       output.state = IndependentSetStatus::WordBudget;
       return false;

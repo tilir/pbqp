@@ -27,6 +27,7 @@ struct BranchAndBoundSettings {
   static constexpr size_t planning_calls = 512;
   static constexpr size_t planning_ms = 25;
   static constexpr size_t quantum = 512;
+  static constexpr size_t timed_quantum = 32;
   size_t jobs;
 
   explicit BranchAndBoundSettings(size_t threads)

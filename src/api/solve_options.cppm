@@ -15,6 +15,7 @@ module;
 #include <unordered_set>
 #include <vector>
 module pbqp:solve_options;
+import :deadline;
 import :failure;
 import :error;
 import :diagnostics;
@@ -121,6 +122,8 @@ struct CommonSolveOptions {
         threads > static_cast<size_t>(std::numeric_limits<int>::max()))
       fail(PBQP_INVALID, "num-threads must be positive and fit in int");
   }
+
+  Deadline deadline() const { return Deadline(view.size("timeout-ms", 0)); }
 
   pbqp_status unsupported(const char *message, pbqp_error *error) const {
     if (warnings_as_errors) {

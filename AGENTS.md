@@ -213,3 +213,22 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
   existing checkout. Do not suppress reports from uninstrumented TBB to claim
   success. If ptrace prevents leak checking, disable it locally and report that
   limitation. Documentation-only changes need no rebuild or test rerun.
+
+## Exact-solver deadlines
+
+API 2.2 adds `PBQP_TIMEOUT` without changing existing enum values or layouts.
+The SIZE key `timeout-ms` applies to naive and all B&B profiles; zero/omitted
+means unlimited. Start a monotonic budget before validation/preparation, include
+callbacks and all workers, and stop cooperatively between preparation steps and
+short search batches. Never use timer threads, asynchronous exceptions, or
+forced cancellation. Individual validation/allocation/bound/reduction operations,
+callbacks, scheduler work, and cleanup can overrun a soft deadline.
+
+Timeout returns no solution, including a partial incumbent, and proves nothing
+about feasibility. Join every worker/callback and wake waiting B&B consumers
+before return. Do not finalize heartbeat to 100 on interruption. Heuristics do
+not consume the key, following normal unknown-option warnings/Werror. Keep
+untimed naive deadline polling compiled away. Preserve timeout, queue-wakeup,
+callback-time, fallback, and binding tests; the C example demonstrates 15000 ms
+and can accept a shorter demonstration budget. CLI `--timeout=SECONDS` maps
+exactly to milliseconds (up to three decimal places) and timeout exits with 4.

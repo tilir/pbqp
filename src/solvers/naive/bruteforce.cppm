@@ -15,6 +15,7 @@ module;
 #include <vector>
 
 module pbqp:bruteforce;
+import :deadline;
 import :error;
 import :evaluation;
 import :ownership;
@@ -25,17 +26,20 @@ class BruteForceSearch {
   const pbqp_problem &problem;
   pbqp_progress_callback progress;
   void *user_data;
+  Deadline deadline;
+  bool interrupted = false;
   SolutionPtr solution;
   std::vector<size_t> tuple;
   std::vector<size_t> boundary;
 
   bool advance() noexcept;
-  template <typename Observer> bool search(Observer observe) noexcept;
+  template <bool Timed, typename Observer>
+  bool search(Observer observe) noexcept;
 
 public:
   BruteForceSearch(const pbqp_problem &p, pbqp_progress_callback callback,
-                   void *data) noexcept
-      : problem(p), progress(callback), user_data(data) {}
+                   void *data, Deadline limit = Deadline{}) noexcept
+      : problem(p), progress(callback), user_data(data), deadline(limit) {}
 
   void prepare();
   pbqp_status run(pbqp_error *error) noexcept;
@@ -59,10 +63,17 @@ bool BruteForceSearch::advance() noexcept {
   return false;
 }
 
-template <typename Observer>
+template <bool Timed, typename Observer>
 bool BruteForceSearch::search(Observer observe) noexcept {
   bool found = false;
+  unsigned batch = 0;
   do {
+    if constexpr (Timed) {
+      if (batch++ % 256 == 0 && deadline.expired()) {
+        interrupted = true;
+        break;
+      }
+    }
     pbqp_cost_t cost;
     if (evaluate_assignment(problem, tuple.data(), cost) &&
         (!found || cost < solution->cost)) {
@@ -80,13 +91,17 @@ pbqp_status BruteForceSearch::run(pbqp_error *error) noexcept {
   bool found;
   if (progress) {
     PercentProgress reporter(problem, progress, user_data, boundary.data());
-    found = search([&](const size_t *completed) noexcept {
+    auto observe = [&](const size_t *completed) noexcept {
       reporter.completed(completed);
-    });
+    };
+    found = deadline.enabled() ? search<true>(observe) : search<false>(observe);
   } else {
     // The no-op observer is compiled away when progress is disabled.
-    found = search([](const size_t *) noexcept {});
+    auto observe = [](const size_t *) noexcept {};
+    found = deadline.enabled() ? search<true>(observe) : search<false>(observe);
   }
+  if (interrupted)
+    return set_error(error, PBQP_TIMEOUT, 0, "exact search timed out");
   if (!found)
     return set_error(error, PBQP_INFEASIBLE, 0, "no feasible tuple");
   solution->quality = PBQP_SOLUTION_OPTIMAL;

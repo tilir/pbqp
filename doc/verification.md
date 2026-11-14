@@ -289,6 +289,19 @@ mt19937_64 engine.
 CLI tests compare task data independently of provenance, query --version, and
 replay a recorded command with spaces, quotes, and a newline in the output path.
 
+## Cooperative timeouts
+
+`test_timeout` covers sequential/parallel naive and every B&B profile, with and
+without heuristic seeds and progress. Single-job B&B runs leave consumers
+waiting and verify deadline cancellation wakes them. Delayed diagnostics verify
+callback time belongs to the preparation budget. Checks cover NULL results,
+diagnostics, zero/huge/wrong-type budgets, last-key precedence, root proofs,
+heuristic warning policy, and successful reuse/fallback. Tests assert contracts,
+not tight wall-clock thresholds; CTest supplies a broad hang guard. Public C++,
+Python, and Ruby tests exercise timeout status and a heuristic retry. The native
+C example has smoke tests for both optimal and fallback outcomes. The TSan
+script includes the timeout regression alongside parallel/search-internal tests.
+
 ## PBQP 2 review regressions
 
 Unused 60000-by-60000 SPARSE definitions, including truncated and duplicate

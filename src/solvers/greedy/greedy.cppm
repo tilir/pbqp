@@ -18,6 +18,7 @@ module;
 #include <vector>
 
 module pbqp:greedy;
+import :deadline;
 import :error;
 import :evaluation;
 import :ownership;
@@ -48,7 +49,7 @@ public:
   explicit GreedySearch(const pbqp_problem &p) noexcept : problem(p) {}
 
   pbqp_status prepare(pbqp_error *error);
-  pbqp_status run(pbqp_error *error) noexcept;
+  pbqp_status run(pbqp_error *error, Deadline deadline = Deadline{}) noexcept;
 
   pbqp_cost_t solution_cost() const noexcept { return solution->cost; }
 
@@ -161,9 +162,11 @@ bool GreedySearch::assign_node(size_t node,
   return found;
 }
 
-pbqp_status GreedySearch::run(pbqp_error *error) noexcept {
+pbqp_status GreedySearch::run(pbqp_error *error, Deadline deadline) noexcept {
   size_t end = 0;
   for (size_t step = 0; step < problem.num_nodes; ++step) {
+    if (deadline.expired())
+      return set_error(error, PBQP_TIMEOUT, 0, "exact-search seed timed out");
     size_t node = order[step].id;
     size_t begin = end;
     while (end < problem.num_edges && later_step(incident[end]) == step)

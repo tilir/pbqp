@@ -16,6 +16,7 @@ module;
 #include <vector>
 
 module pbqp:reduction;
+import :deadline;
 import :error;
 import :evaluation;
 import :ownership;
@@ -36,7 +37,7 @@ class ReductionSearch {
 public:
   explicit ReductionSearch(const pbqp_problem &p) : problem(p), graph(p) {}
 
-  void prepare();
+  void prepare(Deadline deadline = Deadline{});
   pbqp_status run(pbqp_error *error) noexcept;
 
   const pbqp_solution &get_solution() const noexcept { return *solution; }
@@ -94,11 +95,13 @@ size_t ReductionSearch::reduce_two(size_t id) {
   return graph.merge_edge(src, tgt, std::move(delta));
 }
 
-void ReductionSearch::prepare() {
+void ReductionSearch::prepare(Deadline deadline) {
   solution = make_solution(problem.num_nodes);
   order.reserve(problem.num_nodes);
   ReductionWorklist worklist(graph);
   while (order.size() < graph.num_nodes()) {
+    if (deadline.expired())
+      return;
     size_t id = worklist.next_node();
     graph.freeze(id);
     switch (graph.degree(id)) {

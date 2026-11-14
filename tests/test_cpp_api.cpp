@@ -133,6 +133,25 @@ void test_borrowed_and_callbacks() {
   }
 }
 
+void test_timeout() {
+  const pbqp_cost_t costs[] = {0, 0};
+  const std::vector<pbqp_node> nodes(65, pbqp_node{2, costs});
+  const pbqp_problem problem{nodes.size(), 0, nodes.data(), nullptr};
+  pbqp::SolveOptions options;
+  options.num_threads = 4;
+  options.parameters["timeout-ms"] = std::size_t{1};
+  bool caught = false;
+  try {
+    pbqp::solve(problem, pbqp::Solver::Naive, options);
+  } catch (const pbqp::Error &error) {
+    caught = true;
+    check(error.status() == PBQP_TIMEOUT && error.line() == 0);
+  }
+  check(caught);
+  auto fallback = pbqp::solve(problem, pbqp::Solver::Reduction);
+  check(fallback.quality == pbqp::Quality::Feasible && fallback.cost == 0);
+}
+
 void test_parsed(const std::filesystem::path &input,
                  const std::filesystem::path &output) {
   pbqp::Solution solution;
@@ -172,6 +191,7 @@ int main(int argc, char **argv) {
   try {
     check(argc == 3);
     test_borrowed_and_callbacks();
+    test_timeout();
     test_parsed(argv[1], argv[2]);
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

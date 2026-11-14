@@ -45,7 +45,7 @@ run("${CMAKE_COMMAND}" -G Ninja -S "${PBQP_SOURCE}" -B "${pbqp_build}"
   -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
   -DBUILD_TESTING=ON -DPBQP_BUILD_BENCHMARKS=OFF)
 run("${CMAKE_COMMAND}" --build "${pbqp_build}"
-  --target test_parallel_exact test_search_internals --parallel "${PBQP_BUILD_JOBS}")
+  --target test_parallel_exact test_search_internals test_timeout --parallel "${PBQP_BUILD_JOBS}")
 run("${CMAKE_COMMAND}" -E env TSAN_OPTIONS=halt_on_error=1
   "${PBQP_CTEST}" --test-dir "${pbqp_build}" --output-on-failure
-  -R "parallel_exact|search_internals")
+  -R "parallel_exact|search_internals|timeout")

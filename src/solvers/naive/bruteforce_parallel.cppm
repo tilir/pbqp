@@ -16,6 +16,7 @@ module;
 #include <vector>
 
 module pbqp:bruteforce_parallel;
+import :deadline;
 import :error;
 import :evaluation;
 import :ownership;
@@ -29,6 +30,8 @@ class BruteForceWorker {
   std::vector<size_t> tuple;
   SolutionPtr best;
   bool feasible = false;
+  bool interrupted = false;
+  Deadline deadline;
 
   bool advance(size_t root) noexcept {
     for (size_t id = tuple.size(); id > root; --id) {
@@ -39,10 +42,17 @@ class BruteForceWorker {
     return false;
   }
 
-  template <typename Observer>
+  template <bool Timed, typename Observer>
   void enumerate(size_t root, Observer observe) noexcept {
     std::fill(tuple.begin() + root, tuple.end(), size_t{0});
+    unsigned batch = 0;
     do {
+      if constexpr (Timed) {
+        if (batch++ % 256 == 0 && deadline.expired()) {
+          interrupted = true;
+          return;
+        }
+      }
       pbqp_cost_t cost;
       if (evaluate_assignment(problem, tuple.data(), cost) &&
           (!feasible || cost < best->cost)) {
@@ -56,24 +66,29 @@ class BruteForceWorker {
   }
 
 public:
-  explicit BruteForceWorker(const pbqp_problem &p)
-      : problem(p), tuple(p.num_nodes), best(make_solution(p.num_nodes)) {}
+  explicit BruteForceWorker(const pbqp_problem &p, Deadline limit = Deadline{})
+      : problem(p), tuple(p.num_nodes), best(make_solution(p.num_nodes)),
+        deadline(limit) {}
+
+  bool timed_out() const noexcept { return interrupted; }
 
   bool found() const noexcept { return feasible; }
 
   const pbqp_solution &result() const noexcept { return *best; }
 
-  template <typename Observer>
+  template <bool Timed, typename Observer>
   void search(const PrefixTask &task, Observer observe) noexcept {
     size_t root = task.ranks.size();
     std::copy(task.ranks.begin(), task.ranks.end(), tuple.begin());
     if (task.child_begin == task.child_end) {
-      enumerate(root, observe);
+      enumerate<Timed>(root, observe);
       return;
     }
     for (size_t option = task.child_begin; option < task.child_end; ++option) {
       tuple[root] = option;
-      enumerate(root + 1, observe);
+      enumerate<Timed>(root + 1, observe);
+      if (interrupted)
+        return;
     }
   }
 };
@@ -81,6 +96,7 @@ public:
 class ParallelBruteForceSearch {
   const pbqp_problem &problem;
   size_t num_threads;
+  Deadline deadline;
   PrefixPlan plan;
   PrefixQueue queue;
   std::vector<BruteForceWorker> workers;
@@ -88,24 +104,26 @@ class ParallelBruteForceSearch {
   std::unique_ptr<SubtreeProgress> progress;
   std::vector<SubtreeProgress::Accumulator> progress_workers;
 
-  template <typename Observer, typename Completed>
+  template <bool Timed, typename Observer, typename Completed>
   void consume_tasks(size_t id, Observer observe,
                      Completed completed) noexcept {
     size_t task;
     while (queue.claim(plan.tasks.size(), task)) {
-      workers[id].search(plan.tasks[task], observe);
+      workers[id].template search<Timed>(plan.tasks[task], observe);
       completed();
+      if (workers[id].timed_out())
+        break;
     }
   }
 
-  void consume(size_t id) noexcept {
+  template <bool Timed> void consume(size_t id) noexcept {
     if (progress) {
       auto &local = progress_workers[id];
-      consume_tasks(
+      consume_tasks<Timed>(
           id, [&]() noexcept { local.completed_prefix(problem.num_nodes); },
           [&]() noexcept { local.flush(); });
     } else
-      consume_tasks(id, []() noexcept {}, []() noexcept {});
+      consume_tasks<Timed>(id, []() noexcept {}, []() noexcept {});
   }
 
   bool precedes(const pbqp_solution &candidate) const noexcept {
@@ -119,8 +137,10 @@ class ParallelBruteForceSearch {
 
 public:
   ParallelBruteForceSearch(const pbqp_problem &p, size_t threads,
-                           pbqp_progress_callback callback, void *data)
-      : problem(p), num_threads(threads), solution(make_solution(p.num_nodes)) {
+                           pbqp_progress_callback callback, void *data,
+                           Deadline limit = Deadline{})
+      : problem(p), num_threads(threads), deadline(limit),
+        solution(make_solution(p.num_nodes)) {
     if (callback)
       progress = std::make_unique<SubtreeProgress>(p, callback, data);
   }
@@ -150,7 +170,7 @@ void ParallelBruteForceSearch::prepare() {
   }
   workers.reserve(count);
   for (size_t id = 0; id < count; ++id)
-    workers.emplace_back(problem);
+    workers.emplace_back(problem, deadline);
 }
 
 bool ParallelBruteForceSearch::collect() noexcept {
@@ -171,7 +191,15 @@ bool ParallelBruteForceSearch::collect() noexcept {
 }
 
 pbqp_status ParallelBruteForceSearch::run(pbqp_error *error) {
-  run_parallel(workers.size(), [&](size_t id) noexcept { consume(id); });
+  run_parallel(workers.size(), [&](size_t id) noexcept {
+    if (deadline.enabled())
+      consume<true>(id);
+    else
+      consume<false>(id);
+  });
+  if (std::any_of(workers.begin(), workers.end(),
+                  [](const auto &worker) { return worker.timed_out(); }))
+    return set_error(error, PBQP_TIMEOUT, 0, "exact search timed out");
   if (!collect())
     return set_error(error, PBQP_INFEASIBLE, 0, "no feasible tuple");
   solution->quality = PBQP_SOLUTION_OPTIMAL;

@@ -94,7 +94,23 @@ copy = nil
 check(frees == [3])
 
 library = PBQP::Library.new(ARGV[0])
-check(library.version == [2, 1, 0])
+check(library.version == [2, 2, 0])
+Dir.mktmpdir do |directory|
+  path = File.join(directory, 'timeout.pbqp')
+  File.write(path, "PBQP 1 NODES 65 EDGES 0\n" +
+    (0...65).map { |node| "NODE #{node} 2 0 0\n" }.join + "END\n")
+  library.read(path) do |problem|
+    error = expect_error(PBQP::Error) do
+      problem.solve(PBQP::Solver::NAIVE, num_threads: 4,
+                    options: { 'timeout-ms' => 1 })
+    end
+    check(error.status == PBQP::Status::TIMEOUT)
+    result = problem.solve(PBQP::Solver::R1R2RN)
+    check(result.quality == PBQP::Quality::FEASIBLE)
+    check(problem.evaluate(result.options).is_feasible)
+  end
+end
+
 closed = nil
 solutions = library.read(ARGV[1]) do |problem|
   closed = problem

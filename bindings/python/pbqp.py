@@ -1,4 +1,4 @@
-"""Small ctypes binding for PBQP C API 2.1: file I/O, solving, and evaluation.
+"""Small ctypes binding for PBQP C API 2.2: file I/O, solving, and evaluation.
 
 SPDX-License-Identifier: GPL-3.0-only
 See LICENSE for the full license text.
@@ -34,6 +34,7 @@ class Status(IntEnum):
     INFEASIBLE = 5
     NO_SOLUTION = 6
     INTERNAL_ERROR = 7
+    TIMEOUT = 8
 
 
 class PBQPError(RuntimeError):

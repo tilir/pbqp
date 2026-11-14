@@ -23,6 +23,7 @@ import :independent_sets;
 import :bitset;
 import :ownership;
 import :evaluation;
+import :deadline;
 
 namespace pbqp {
 class RegisterCoverSeed {
@@ -62,7 +63,7 @@ private:
 public:
   RegisterCoverSeed(const pbqp_problem &input, const IndependentSets &sets);
   ~RegisterCoverSeed() noexcept;
-  bool run(pbqp_cost_t target = 0) noexcept;
+  bool run(pbqp_cost_t target = 0, Deadline deadline = Deadline{}) noexcept;
 
   bool enabled() const noexcept { return supported; }
 
@@ -306,11 +307,13 @@ bool RegisterCoverSeed::keep() noexcept {
   return false;
 }
 
-bool RegisterCoverSeed::run(pbqp_cost_t target) noexcept {
+bool RegisterCoverSeed::run(pbqp_cost_t target, Deadline deadline) noexcept {
   if (!supported)
     return false;
   std::uniform_real_distribution<double> perturbation(0.25, 1.75);
   for (size_t attempt = 0; attempt < restart_limit; ++attempt) {
+    if (deadline.expired())
+      break;
     ++restarts;
     for (size_t id = 0; id < problem.num_nodes; ++id)
       values[id] = costs[id] * (attempt ? perturbation(random) : 1.0);

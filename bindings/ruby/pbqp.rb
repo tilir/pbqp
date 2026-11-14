@@ -1,4 +1,4 @@
-# Standard-library Fiddle binding for PBQP C API 2.1.
+# Standard-library Fiddle binding for PBQP C API 2.2.
 # SPDX-License-Identifier: GPL-3.0-only
 # See LICENSE for the full license text.
 
@@ -27,6 +27,7 @@ module PBQP
     INFEASIBLE = 5
     NO_SOLUTION = 6
     INTERNAL_ERROR = 7
+    TIMEOUT = 8
   end
 
   module Native

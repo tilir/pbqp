@@ -13,12 +13,14 @@ module;
 #include <utility>
 #include <vector>
 module pbqp:bnb_tasks;
+import :deadline;
 import :bnb_incumbent;
 import :bnb_work_queue;
 
 namespace pbqp {
 template <typename Bounds> class PrefixPlanner {
   const Bounds &bounds;
+  Deadline deadline;
   BranchAndBoundIncumbent &incumbent;
   typename Bounds::Workspace workspace;
   std::vector<size_t> tuple;
@@ -28,6 +30,8 @@ template <typename Bounds> class PrefixPlanner {
   std::chrono::steady_clock::time_point started;
 
   bool exhausted() {
+    if (deadline.expired())
+      return true;
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                        std::chrono::steady_clock::now() - started)
                        .count();
@@ -102,8 +106,10 @@ template <typename Bounds> class PrefixPlanner {
   }
 
 public:
-  PrefixPlanner(const Bounds &b, BranchAndBoundIncumbent &i)
-      : bounds(b), incumbent(i), workspace(b), tuple(b.input().num_nodes) {}
+  PrefixPlanner(const Bounds &b, BranchAndBoundIncumbent &i,
+                Deadline limit = Deadline{})
+      : bounds(b), deadline(limit), incumbent(i), workspace(b),
+        tuple(b.input().num_nodes) {}
 
   AdaptivePlan build(const BranchAndBoundSettings &settings) {
     started = std::chrono::steady_clock::now();

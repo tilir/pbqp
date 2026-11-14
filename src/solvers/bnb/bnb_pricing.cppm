@@ -28,9 +28,10 @@ module;
 #include <vector>
 module pbqp:bnb_pricing;
 import :independent_sets;
+import :deadline;
 
 namespace pbqp {
-enum class PriceResult { Useful, NonPositive, NonFinite };
+enum class PriceResult { Useful, NonPositive, NonFinite, Interrupted };
 enum class PricingStatus {
   NotPrepared,
   Enabled,
@@ -46,6 +47,7 @@ enum class PricingStatus {
 
 class PriceOptimizer {
   const pbqp_problem &problem;
+  Deadline deadline;
   const IndependentSets &sets;
   const size_t registers;
   size_t used_iterations = 0;
@@ -61,10 +63,11 @@ public:
   // Continuation in price/cost units, not a PBQP invariant or error tolerance.
   static constexpr std::array temperatures{4.0, 1.0, 0.25, 0.0625};
 
-  PriceOptimizer(const pbqp_problem &p, const IndependentSets &patterns)
-      : problem(p), sets(patterns), registers(p.nodes[0].num_options - 1),
-        x(p.num_nodes), y(p.num_nodes), next(p.num_nodes),
-        gradient(p.num_nodes), scores(patterns.size()),
+  PriceOptimizer(const pbqp_problem &p, const IndependentSets &patterns,
+                 Deadline limit = Deadline{})
+      : problem(p), deadline(limit), sets(patterns),
+        registers(p.nodes[0].num_options - 1), x(p.num_nodes), y(p.num_nodes),
+        next(p.num_nodes), gradient(p.num_nodes), scores(patterns.size()),
         probabilities(scores.size()) {}
 
   size_t iterations_used() const noexcept { return used_iterations; }
@@ -124,6 +127,8 @@ void PriceOptimizer::relax(double temperature) {
   double step =
       temperature / (static_cast<double>(registers) * sets.maximum_size());
   for (size_t iteration = 0; iteration < iterations; ++iteration) {
+    if (deadline.expired())
+      return;
     ++used_iterations;
     prepare_gradient(temperature);
     // Nesterov/FISTA momentum recurrence; no per-iteration monotonicity claim.
@@ -136,6 +141,8 @@ void PriceOptimizer::relax(double temperature) {
 PriceResult PriceOptimizer::run() {
   for (double temperature : temperatures) {
     relax(temperature);
+    if (deadline.expired())
+      return PriceResult::Interrupted;
     // Check the hard objective F(x), not the smoothed surrogate. This only
     // decides whether to keep investing in weights; it never cuts a subtree.
     double maximum = score_patterns(x), total = 0;
@@ -234,7 +241,8 @@ private:
   PricingStatus state = PricingStatus::NotPrepared;
 
 public:
-  void prepare(const pbqp_problem &problem, const IndependentSets &patterns);
+  void prepare(const pbqp_problem &problem, const IndependentSets &patterns,
+               Deadline deadline = Deadline{});
 
   PricingStatus status() const noexcept { return state; }
 
@@ -254,7 +262,8 @@ public:
 };
 
 void RegallocPricing::prepare(const pbqp_problem &problem,
-                              const IndependentSets &patterns) {
+                              const IndependentSets &patterns,
+                              Deadline deadline) {
   if (ready())
     return;
   if (!patterns.complete()) {
@@ -277,9 +286,11 @@ void RegallocPricing::prepare(const pbqp_problem &problem,
     state = PricingStatus::VisitBudget;
     return;
   }
-  PriceOptimizer optimizer(problem, patterns);
+  PriceOptimizer optimizer(problem, patterns, deadline);
   auto result = optimizer.run();
   used_iterations = optimizer.iterations_used();
+  if (result == PriceResult::Interrupted)
+    return;
   if (result != PriceResult::Useful) {
     state = result == PriceResult::NonPositive ? PricingStatus::NonPositive
                                                : PricingStatus::NonFinite;

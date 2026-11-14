@@ -9,7 +9,7 @@ changing partition names or making private partitions available to clients.
 | --- | --- |
 | `src/` | Primary module and library assembly in CMake |
 | `src/api/` | C entry points, validation boundaries, exception translation, diagnostics |
-| `src/core/` | Structural validation, ownership, reference evaluation, dynamic bitsets, independent sets, internal failures |
+| `src/core/` | Structural validation, ownership, reference evaluation, dynamic bitsets, independent sets, cooperative deadlines, internal failures |
 | `src/io/` | Tokenization, parsing helpers, cost serialization |
 | `src/search/` | Prefix jobs, dispatch, percentage boundaries, covered-space accumulation |
 | `src/solvers/naive/` | Sequential and parallel exhaustive enumeration |
@@ -121,6 +121,26 @@ configures a private identity header from an explicit source list; formatting
 registers its template, not generated output. CLI provenance is appended as
 comments after END without extending the C problem struct or retaining comments
 inside library views.
+
+## Cooperative time budgets
+
+`core/deadline.cppm` holds a monotonic start time and a millisecond budget; zero
+is unlimited. Copies share the logical deadline without mutable shared state.
+Exact API boundaries create it before validation/preparation and pass it through
+orchestration, optional preparation, and workers. It creates no timer thread.
+Heuristic seed helpers may consume it internally; standalone heuristic entries
+do not consume `timeout-ms`.
+
+Naive specializes timed/untimed loops, polling every 256 tuples only in timed
+calls. Each parallel consumer stops against the same deadline and joins before
+the API translates interruption to `PBQP_TIMEOUT`. B&B polls between short DFS
+chunks (32 bound checks with a timeout, normally 512) and cancels its queue,
+waking blocked consumers. It also checks preparation boundaries and bounded
+clique/catalogue/pricing/seed iterations. A partial plan or catalogue is never
+used as a completeness certificate. Expiration discards partial minima and
+incumbents under the normal failure/output-NULL ownership contract. Only
+finished proofs finalize progress. Individual allocations, validation passes,
+bounds, reductions, callbacks, scheduling, and cleanup remain non-preemptible.
 
 Generator provenance is published with the task by a same-directory staged
 rename. Its source identity reuses the component-owned production library and
