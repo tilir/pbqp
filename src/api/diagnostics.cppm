@@ -17,15 +17,18 @@ module;
 #include <string_view>
 #include <type_traits>
 module pbqp:diagnostics;
+
 namespace pbqp {
 class Diagnostics {
   pbqp_diagnostic_callback callback = nullptr;
   void *user_data = nullptr;
+
   // Explicit text writes avoid nonmember stream-overload lookup across module
   // instantiations (GCC can otherwise select pointer insertion for literals).
   static void append(std::ostringstream &out, std::string_view text) {
     out.write(text.data(), static_cast<std::streamsize>(text.size()));
   }
+
   template <typename Value>
     requires std::is_arithmetic_v<Value>
   static void append(std::ostringstream &out, Value value) {
@@ -34,9 +37,12 @@ class Diagnostics {
 
 public:
   Diagnostics() = default;
+
   Diagnostics(pbqp_diagnostic_callback cb, void *data) noexcept
       : callback(cb), user_data(data) {}
+
   explicit operator bool() const noexcept { return callback != nullptr; }
+
   template <typename... Values> void line(const Values &...values) const {
     if (!callback)
       return;

@@ -16,6 +16,7 @@ module pbqp:bnb_worker;
 import :bnb_incumbent;
 import :bnb_work_queue;
 import :ownership;
+
 namespace pbqp {
 // Non-template ownership keeps container destruction in this module unit.
 // In particular, API consumers do not instantiate an allocator for nested
@@ -25,6 +26,7 @@ struct BranchAndBoundLookahead {
     pbqp_cost_t bound = 0;
     bool live = false;
   };
+
   std::vector<std::vector<Child>> children;
   std::vector<double> weight, child_weight;
   size_t scan = 0, survivors = 0;
@@ -55,6 +57,7 @@ template <typename Bounds> class BranchAndBoundWorker {
   std::unique_ptr<BranchAndBoundLookahead> lookahead;
   bool found = false, batch = false, busy = false;
   size_t base = 0, root = 0, depth = 0;
+
   bool advance() noexcept {
     while (depth > root) {
       size_t step = depth - 1, id = bounds.node(step);
@@ -71,6 +74,7 @@ template <typename Bounds> class BranchAndBoundWorker {
     }
     return false;
   }
+
   bool advance_filtered() noexcept {
     while (depth > base) {
       const size_t step = depth - 1;
@@ -89,6 +93,7 @@ template <typename Bounds> class BranchAndBoundWorker {
     busy = false;
     return false;
   }
+
   void begin_children() noexcept {
     auto &state = *lookahead;
     state.preparing = true;
@@ -99,6 +104,7 @@ template <typename Bounds> class BranchAndBoundWorker {
                         ? task.child_end
                         : bounds.domains().nodes[depth].num_options;
   }
+
   void check_child() noexcept {
     auto &state = *lookahead;
     const size_t id = bounds.node(depth);
@@ -111,6 +117,7 @@ template <typename Bounds> class BranchAndBoundWorker {
         incumbent.can_improve(child.bound);
     state.survivors += child.live;
   }
+
   void enter_children() noexcept {
     auto &state = *lookahead;
     while (!state.children[depth][cursor[depth]].live)
@@ -121,6 +128,7 @@ template <typename Bounds> class BranchAndBoundWorker {
     ++depth;
     state.weight[depth] = state.child_weight[depth - 1];
   }
+
   template <typename Observer>
   void close_exhausted_node(Observer &observe) noexcept {
     // An initial or donated job rejected on arrival contributes no searched
@@ -130,6 +138,7 @@ template <typename Bounds> class BranchAndBoundWorker {
     else
       observe.completed(lookahead->weight[depth]);
   }
+
   template <typename Observer>
   bool chunk_filtered(size_t quota, Observer &observe) noexcept {
     auto &state = *lookahead;
@@ -178,6 +187,7 @@ template <typename Bounds> class BranchAndBoundWorker {
     }
     return false;
   }
+
   void keep(pbqp_cost_t cost) noexcept {
     if (!found || cost < best->cost) {
       found = true;
@@ -189,6 +199,7 @@ template <typename Bounds> class BranchAndBoundWorker {
 
 public:
   PrefixTask task;
+
   BranchAndBoundWorker(const Bounds &b, BranchAndBoundIncumbent &i,
                        bool estimate_progress = false)
       : bounds(b), incumbent(i), tuple(b.input().num_nodes),
@@ -199,7 +210,9 @@ public:
     if (estimate_progress)
       lookahead = std::make_unique<BranchAndBoundLookahead>(bounds.domains());
   }
+
   bool active() const noexcept { return busy; }
+
   void start(pbqp_cost_t bound) noexcept {
     base = task.ranks.size();
     batch = task.child_begin != task.child_end;
@@ -229,6 +242,7 @@ public:
       bounds.prepare_prefix(tuple.data(), base, workspace,
                             incumbent.cost_limit());
   }
+
   template <typename Observer>
   bool chunk(size_t quota, Observer &&observe) noexcept {
     if constexpr (requires { observe.completed(0.0); }) {
@@ -261,6 +275,7 @@ public:
       return false;
     }
   }
+
   bool share(CoarseWorkQueue &queue) {
     if (!queue.wants_work())
       return false;

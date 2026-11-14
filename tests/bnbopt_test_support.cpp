@@ -45,6 +45,7 @@ import :problem;
 
 namespace {
 std::string context;
+
 void check(bool condition,
            std::source_location location = std::source_location::current()) {
   if (!condition)
@@ -55,11 +56,13 @@ void check(bool condition,
 struct DiagnosticLog {
   std::string text;
 };
+
 void record_diagnostic(const char *message, void *data) noexcept {
   auto &log = *static_cast<DiagnosticLog *>(data);
   log.text += message;
   log.text += '\n';
 }
+
 bool evaluate(const pbqp_problem &problem, const std::vector<size_t> &tuple,
               pbqp_cost_t &cost) {
   cost = 0;
@@ -629,6 +632,7 @@ struct IndependentSubsetReference {
   std::vector<pbqp::BitSet<>> sets;
   bool complete = true;
 };
+
 IndependentSubsetReference
 independent_subsets(std::span<const pbqp::BitSet<>> adjacency) {
   constexpr size_t legacy_subset_limit = 10000;

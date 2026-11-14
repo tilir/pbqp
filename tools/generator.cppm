@@ -73,6 +73,7 @@ class ProblemGenerator {
 
 public:
   explicit ProblemGenerator(std::uint64_t seed) : random(seed) {}
+
   [[nodiscard]] RandomProblem generate(const GeneratorOptions &options);
 };
 

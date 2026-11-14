@@ -54,8 +54,10 @@ public:
                                             ": " + error.message
                                       : std::string(error.message)),
         code(status), source_line(error.line) {}
+
   /** Native failure status. */
   pbqp_status status() const noexcept { return code; }
+
   /** Input source line, or zero when not known. */
   std::size_t line() const noexcept { return source_line; }
 };
@@ -121,6 +123,7 @@ inline Solution solve(const pbqp_problem &problem,
   struct Callbacks {
     const SolveOptions &options;
     std::exception_ptr failure;
+
     static void progress(unsigned percent, void *data) noexcept {
       auto &self = *static_cast<Callbacks *>(data);
       if (self.failure)
@@ -131,6 +134,7 @@ inline Solution solve(const pbqp_problem &problem,
         self.failure = std::current_exception();
       }
     }
+
     static void diagnostics(const char *message, void *data) noexcept {
       auto &self = *static_cast<Callbacks *>(data);
       if (self.failure)
@@ -142,6 +146,7 @@ inline Solution solve(const pbqp_problem &problem,
       }
     }
   } callbacks{options, {}};
+
   const pbqp_solve_options config{
       options.num_threads, options.progress ? Callbacks::progress : nullptr,
       &callbacks, options.diagnostics ? Callbacks::diagnostics : nullptr,
@@ -173,6 +178,7 @@ class Problem {
                     pbqp_problem_free(p);
                   })>
       storage;
+
   explicit Problem(pbqp_problem *p) noexcept : storage(p) {}
 
 public:
@@ -194,20 +200,24 @@ public:
       throw Error(status, error);
     return Problem(raw);
   }
+
   /** Borrows the read-only native view; throws for a moved-from object. */
   const pbqp_problem &view() const {
     if (!storage)
       throw std::logic_error("PBQP problem has been moved from");
     return *storage;
   }
+
   /** Serializes this owned problem. */
   void write(const std::filesystem::path &path) const {
     pbqp::write(path, view());
   }
+
   /** Evaluates a complete assignment span against this problem. */
   Evaluation evaluate(std::span<const std::size_t> options) const {
     return pbqp::evaluate(view(), options);
   }
+
   /** Solves synchronously and returns an independent vector assignment. */
   Solution solve(Solver solver = Solver::BranchAndBoundOptimized,
                  const SolveOptions &options = {}) const {

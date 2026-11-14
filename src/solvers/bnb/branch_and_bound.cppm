@@ -28,6 +28,7 @@ import :greedy;
 import :reduction;
 import :bnbopt_cover;
 import :diagnostics;
+
 namespace pbqp {
 // Called only after preparation, before workers start. Cached frontier bounds
 // cover every remaining subtree, including unchecked child ranges. Closed
@@ -80,11 +81,13 @@ private:
   void seed_incumbent(pbqp_cost_t root_bound);
   void seed_cover(pbqp_cost_t root_bound);
   void prepare_plan();
+
   void finish(size_t index) {
     queue->completed();
     if (progress)
       progress_workers[index].flush();
   }
+
   template <typename Observer> void consume(size_t index, Observer &&observe) {
     auto &worker = workers[index];
     pbqp_cost_t bound;
@@ -108,9 +111,12 @@ public:
       : bounds(p), incumbent(p.num_nodes), requested_threads(threads),
         num_threads(parallel_concurrency(threads)), diagnostics(log),
         settings(num_threads), callback(cb), user_data(data) {}
+
   const SeedStatistics &seed_statistics() const noexcept { return seeds; }
+
   void prepare();
   pbqp_status run(pbqp_error *error);
+
   pbqp_solution *release_solution() noexcept {
     return incumbent.release_solution();
   }

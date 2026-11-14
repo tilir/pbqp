@@ -33,7 +33,9 @@ class TextReader {
 
 public:
   explicit TextReader(std::istream &input) : file(input) {}
+
   size_t token_line() const noexcept { return current_token_line; }
+
   bool next();
   void expect(const char *word);
   size_t size();

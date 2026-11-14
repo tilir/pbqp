@@ -39,6 +39,7 @@ void check(bool condition,
 struct ProgressLog {
   unsigned count = 0;
   bool invalid = false;
+
   static void report(unsigned percent, void *data) noexcept {
     auto &log = *static_cast<ProgressLog *>(data);
     log.invalid |= percent != ++log.count || percent > 100;
@@ -68,12 +69,18 @@ public:
   struct Workspace {
     explicit Workspace(const FilteredTree &) {}
   };
+
   explicit FilteredTree(bool use_forbidden)
       : forbidden(use_forbidden), calls(prefix_count()) {}
+
   const pbqp_problem &input() const noexcept { return problem; }
+
   const pbqp_problem &domains() const noexcept { return problem; }
+
   size_t node(size_t step) const noexcept { return step; }
+
   size_t option(size_t, size_t rank) const noexcept { return rank; }
+
   bool lower_bound(const size_t *tuple, size_t depth, Workspace &,
                    pbqp_cost_t &bound) const noexcept {
     size_t offset = 0, count = 1, index = 0;
@@ -90,6 +97,7 @@ public:
     }
     return true;
   }
+
   bool checked_at_most_once() const {
     return std::all_of(calls.begin(), calls.end(),
                        [](const auto &count) { return count.load() <= 1; });
@@ -163,12 +171,15 @@ void test_progress_completion() {
 struct RecordingProgress {
   pbqp::BranchAndBoundProgress::Accumulator pending;
   double work = 0, skipped = 0;
+
   explicit RecordingProgress(pbqp::BranchAndBoundProgress &progress)
       : pending(progress) {}
+
   void completed(double weight) noexcept {
     work += weight;
     pending.completed(weight);
   }
+
   void discarded(double weight) noexcept {
     skipped += weight;
     pending.discarded(weight);
@@ -227,6 +238,7 @@ class CountingPriceBounds : public pbqp::OptimizedBranchAndBoundBounds {
 public:
   using pbqp::OptimizedBranchAndBoundBounds::OptimizedBranchAndBoundBounds;
   mutable std::atomic<size_t> priced_checks{0};
+
   bool lower_bound(const size_t *tuple, size_t depth, Workspace &workspace,
                    pbqp_cost_t &cost) const noexcept {
     const bool possible = pbqp::OptimizedBranchAndBoundBounds::lower_bound(

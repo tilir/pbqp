@@ -28,6 +28,7 @@ module;
 #include <vector>
 module pbqp:bnbopt_pricing;
 import :independent_sets;
+
 namespace pbqp {
 enum class PriceResult { Useful, NonPositive, NonFinite };
 enum class PricingStatus {
@@ -42,6 +43,7 @@ enum class PricingStatus {
   StateBudget,
   ZeroWeights
 };
+
 class PriceOptimizer {
   const pbqp_problem &problem;
   const IndependentSets &sets;
@@ -58,13 +60,17 @@ public:
   static constexpr size_t iterations = 500;
   // Continuation in price/cost units, not a PBQP invariant or error tolerance.
   static constexpr std::array temperatures{4.0, 1.0, 0.25, 0.0625};
+
   PriceOptimizer(const pbqp_problem &p, const IndependentSets &patterns)
       : problem(p), sets(patterns), registers(p.nodes[0].num_options - 1),
         x(p.num_nodes), y(p.num_nodes), next(p.num_nodes),
         gradient(p.num_nodes), scores(patterns.size()),
         probabilities(scores.size()) {}
+
   size_t iterations_used() const noexcept { return used_iterations; }
+
   PriceResult run();
+
   const std::vector<double> &prices() const noexcept { return x; }
 };
 
@@ -154,6 +160,7 @@ struct QuantizedPrices {
   size_t total = 0;
   double scale = 0;
 };
+
 constexpr size_t capacity_state_budget = 32768;
 
 struct PriceQuantization {
@@ -230,13 +237,21 @@ private:
 
 public:
   void prepare(const pbqp_problem &problem, const IndependentSets &patterns);
+
   PricingStatus status() const noexcept { return state; }
+
   size_t unsupported_cost_node() const noexcept { return unsupported_node; }
+
   size_t iterations_used() const noexcept { return used_iterations; }
+
   size_t effective_weight_limit() const noexcept { return effective_limit; }
+
   double scale() const noexcept { return applied_scale; }
+
   bool ready() const noexcept { return total != 0; }
+
   size_t total_weight() const noexcept { return total; }
+
   size_t weight(size_t node) const noexcept { return weights[node]; }
 };
 

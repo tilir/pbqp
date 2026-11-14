@@ -28,6 +28,7 @@ class BranchAndBoundIncumbent {
 public:
   explicit BranchAndBoundIncumbent(size_t count)
       : solution(make_solution(count)) {}
+
   bool can_improve(pbqp_cost_t bound) const noexcept {
     // Acquire pairs with the first feasibility publication and subsequent cost
     // publications below. Older observations only retain a weaker upper bound;
@@ -36,16 +37,19 @@ public:
     return !feasible.load(std::memory_order_acquire) ||
            bound < upper_bound.load(std::memory_order_acquire);
   }
+
   pbqp_cost_t cost_limit() const noexcept {
     // This is only a bound-work cutoff, not assignment publication. A stale
     // cost weakens the optional refinement; can_improve still checks
     // feasibility.
     return upper_bound.load(std::memory_order_relaxed);
   }
+
   bool found() const noexcept {
     // Acquire pairs with publishing the first complete feasible incumbent.
     return feasible.load(std::memory_order_acquire);
   }
+
   void update(const size_t *options, pbqp_cost_t cost) noexcept {
     if (!can_improve(cost))
       return;
@@ -62,9 +66,12 @@ public:
     // of feasible must distinguish that valid incumbent from no solution.
     feasible.store(true, std::memory_order_release);
   }
+
   // Assignment access is valid before dispatch or after all workers join.
   pbqp_solution &result() noexcept { return *solution; }
+
   const pbqp_solution &result() const noexcept { return *solution; }
+
   pbqp_solution *release_solution() noexcept { return solution.release(); }
 };
 } // namespace pbqp

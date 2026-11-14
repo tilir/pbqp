@@ -15,6 +15,7 @@ module;
 module pbqp:bnb_tasks;
 import :bnb_incumbent;
 import :bnb_work_queue;
+
 namespace pbqp {
 template <typename Bounds> class PrefixPlanner {
   const Bounds &bounds;
@@ -40,6 +41,7 @@ template <typename Bounds> class PrefixPlanner {
     }
     return false;
   }
+
   bool retain(RankedPrefix &prefix) {
     for (size_t step = 0; step < prefix.task.ranks.size(); ++step) {
       size_t node = bounds.node(step);
@@ -60,6 +62,7 @@ template <typename Bounds> class PrefixPlanner {
     }
     return true;
   }
+
   RankedPrefix take_preferred() {
     auto best = frontier.begin();
     for (auto it = best + 1; it != frontier.end(); ++it)
@@ -70,6 +73,7 @@ template <typename Bounds> class PrefixPlanner {
     frontier.erase(best);
     return result;
   }
+
   void expand(RankedPrefix parent, size_t target) {
     size_t original = parent.task.ranks.size();
     while (parent.task.ranks.size() < tuple.size() &&
@@ -100,6 +104,7 @@ template <typename Bounds> class PrefixPlanner {
 public:
   PrefixPlanner(const Bounds &b, BranchAndBoundIncumbent &i)
       : bounds(b), incumbent(i), workspace(b), tuple(b.input().num_nodes) {}
+
   AdaptivePlan build(const BranchAndBoundSettings &settings) {
     started = std::chrono::steady_clock::now();
     RankedPrefix root;

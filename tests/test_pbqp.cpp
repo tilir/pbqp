@@ -55,7 +55,9 @@ public:
            ("pbqp-test-" + std::to_string(stamp) + "-" +
             std::to_string(sequence++));
   }
+
   std::string name() const { return path.string(); }
+
   ~TemporaryFile() {
     std::error_code error;
     std::filesystem::remove(path, error);

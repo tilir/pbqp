@@ -30,6 +30,7 @@ struct ProblemStorage : pbqp_problem {
     nodes = n ? node_records.data() : nullptr;
     edges = m ? edge_records.data() : nullptr;
   }
+
   ProblemStorage(const ProblemStorage &) = delete;
   ProblemStorage &operator=(const ProblemStorage &) = delete;
 };
@@ -42,6 +43,7 @@ public:
     num_nodes = n;
     options = n ? assignment.data() : nullptr;
   }
+
   SolutionStorage(const SolutionStorage &) = delete;
   SolutionStorage &operator=(const SolutionStorage &) = delete;
 };

@@ -25,6 +25,7 @@
 
 namespace {
 std::string context;
+
 void check(bool condition,
            std::source_location location = std::source_location::current()) {
   if (!condition)
@@ -45,20 +46,25 @@ class Fixture {
 
 public:
   explicit Fixture(size_t count) : unary(count), nodes(count) {}
+
   Fixture(const Fixture &) = delete;
   Fixture &operator=(const Fixture &) = delete;
+
   void set_node(size_t id, std::vector<pbqp_cost_t> costs) {
     unary[id] = std::move(costs);
     nodes[id] = {unary[id].size(), unary[id].data()};
   }
+
   void add_edge(size_t src, size_t tgt, std::vector<pbqp_cost_t> costs) {
     check(src < tgt);
     pairwise.push_back(std::move(costs));
     edges.push_back({src, tgt, pairwise.back().data()});
   }
+
   void shuffle_edges(std::mt19937 &random) {
     std::shuffle(edges.begin(), edges.end(), random);
   }
+
   pbqp_problem view() const noexcept {
     return {nodes.size(), edges.size(), nodes.data(), edges.data()};
   }
@@ -81,6 +87,7 @@ struct Snapshot {
       costs.insert(costs.end(), edge.costs, edge.costs + count);
     }
   }
+
   void check_unchanged(const pbqp_problem &p) const {
     Snapshot after(p);
     check(nodes.size() == after.nodes.size() &&

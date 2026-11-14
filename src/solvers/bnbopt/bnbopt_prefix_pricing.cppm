@@ -21,12 +21,15 @@ module pbqp:bnbopt_prefix_pricing;
 import :bitset;
 import :independent_sets;
 import :bnbopt_pricing;
+
 namespace pbqp {
 enum class PrefixPricingStatus { RootUnavailable, CandidateBudget, Enabled };
+
 struct PrefixPricingPlan {
   PrefixPricingStatus status = PrefixPricingStatus::RootUnavailable;
   size_t groups = 0, candidates = 0, state_limit = 0;
 };
+
 PrefixPricingPlan plan_prefix_pricing(const pbqp_problem &problem,
                                       const IndependentSets &sets,
                                       const RegallocPricing &root,
@@ -62,12 +65,19 @@ public:
   PrefixPriceOptimizer(PrefixPriceOptimizer &&) noexcept = default;
   PrefixPriceOptimizer(const PrefixPriceOptimizer &) = delete;
   ~PrefixPriceOptimizer() noexcept;
+
   bool enabled() const noexcept { return limit != 0; }
+
   size_t state_limit() const noexcept { return limit; }
+
   bool available() const noexcept { return selected_total != 0; }
+
   size_t weight(size_t id) const noexcept { return selected_weights[id]; }
+
   size_t total_weight() const noexcept { return selected_total; }
+
   size_t iterations_used() const noexcept { return completed_iterations; }
+
   bool begin(std::span<const BitSet<>> colored,
              const BitSet<> &assigned) noexcept;
   bool relax(double temperature) noexcept;
@@ -127,6 +137,7 @@ PrefixPriceOptimizer::PrefixPriceOptimizer(const pbqp_problem &p,
   selected_weights.resize(nodes);
   fixed.resize(nodes);
 }
+
 PrefixPriceOptimizer::~PrefixPriceOptimizer() noexcept = default;
 
 void PrefixPriceOptimizer::reduce_patterns(const BitSet<> &assigned) noexcept {

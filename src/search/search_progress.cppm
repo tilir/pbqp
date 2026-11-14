@@ -27,6 +27,7 @@ class CoveredSpace {
 public:
   explicit CoveredSpace(const pbqp_problem &p)
       : problem(p), digits(p.num_nodes) {}
+
   void add_prefix(size_t depth) noexcept {
     if (!depth) {
       complete = true;
@@ -39,6 +40,7 @@ public:
     }
     complete = true;
   }
+
   void add(const CoveredSpace &other) noexcept {
     bool carry = false;
     for (size_t id = digits.size(); id > 0; --id) {
@@ -61,12 +63,14 @@ public:
     }
     complete |= other.complete || carry;
   }
+
   bool exceeds(const std::vector<size_t> &boundary) const noexcept {
     if (complete)
       return true;
     return std::lexicographical_compare(boundary.begin(), boundary.end(),
                                         digits.begin(), digits.end());
   }
+
   void clear() noexcept {
     std::fill(digits.begin(), digits.end(), size_t{0});
     complete = false;
@@ -91,6 +95,7 @@ class SubtreeProgress {
         percentage_boundary(problem, next_percent, boundary.data());
     }
   }
+
   void merge(const CoveredSpace &pending) noexcept {
     std::scoped_lock lock(mutex);
     covered.add(pending);
@@ -105,6 +110,7 @@ public:
 
   public:
     explicit Accumulator(SubtreeProgress &p) : owner(p), pending(p.problem) {}
+
     void completed_prefix(size_t depth) noexcept {
       pending.add_prefix(depth);
       // Large cuts report immediately. Small cuts are merged in bounded batches
@@ -112,6 +118,7 @@ public:
       if (++events == 256 || depth <= owner.immediate_depth)
         flush();
     }
+
     void flush() noexcept {
       if (!events)
         return;
@@ -133,6 +140,7 @@ public:
       prefixes *= p.nodes[immediate_depth++].num_options;
     }
   }
+
   void completed_prefix(size_t depth) noexcept {
     std::scoped_lock lock(mutex);
     covered.add_prefix(depth);

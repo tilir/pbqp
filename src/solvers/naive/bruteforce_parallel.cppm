@@ -38,6 +38,7 @@ class BruteForceWorker {
     }
     return false;
   }
+
   template <typename Observer>
   void enumerate(size_t root, Observer observe) noexcept {
     std::fill(tuple.begin() + root, tuple.end(), size_t{0});
@@ -57,8 +58,11 @@ class BruteForceWorker {
 public:
   explicit BruteForceWorker(const pbqp_problem &p)
       : problem(p), tuple(p.num_nodes), best(make_solution(p.num_nodes)) {}
+
   bool found() const noexcept { return feasible; }
+
   const pbqp_solution &result() const noexcept { return *best; }
+
   template <typename Observer>
   void search(const PrefixTask &task, Observer observe) noexcept {
     size_t root = task.ranks.size();
@@ -93,6 +97,7 @@ class ParallelBruteForceSearch {
       completed();
     }
   }
+
   void consume(size_t id) noexcept {
     if (progress) {
       auto &local = progress_workers[id];
@@ -102,12 +107,14 @@ class ParallelBruteForceSearch {
     } else
       consume_tasks(id, []() noexcept {}, []() noexcept {});
   }
+
   bool precedes(const pbqp_solution &candidate) const noexcept {
     return problem.num_nodes &&
            std::lexicographical_compare(
                candidate.options, candidate.options + problem.num_nodes,
                solution->options, solution->options + problem.num_nodes);
   }
+
   bool collect() noexcept;
 
 public:
@@ -117,8 +124,10 @@ public:
     if (callback)
       progress = std::make_unique<SubtreeProgress>(p, callback, data);
   }
+
   void prepare();
   pbqp_status run(pbqp_error *error);
+
   pbqp_solution *release_solution() noexcept { return solution.release(); }
 };
 

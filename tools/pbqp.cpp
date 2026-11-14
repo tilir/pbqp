@@ -45,12 +45,14 @@ void help() {
          "  greedy  Cost-priority heuristic; returns a feasible, possibly "
          "suboptimal solution.\n";
 }
+
 void heartbeat(unsigned percent, void *) noexcept {
   std::cerr.put('.');
   if (percent == 100)
     std::cerr.put('\n');
   std::cerr.flush();
 }
+
 struct SolverOptions {
   std::string_view solver{};
   pbqp_solver algorithm = PBQP_SOLVER_NAIVE;
@@ -120,6 +122,7 @@ std::optional<SolverOptions> parse_options(int argc, char **argv) {
     return std::nullopt;
   }
 }
+
 void print_parameters(const SolverOptions &options) {
   std::cerr << "solver: " << options.solver << '\n'
             << "input: " << options.input << '\n'
@@ -127,6 +130,7 @@ void print_parameters(const SolverOptions &options) {
             << "heartbeat: "
             << (options.report_progress ? "enabled" : "disabled") << '\n';
 }
+
 void diagnostic(const char *message, void *) noexcept {
   std::cerr << message << '\n';
 }

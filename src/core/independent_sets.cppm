@@ -14,6 +14,7 @@ module;
 #include <vector>
 module pbqp:independent_sets;
 import :bitset;
+
 namespace pbqp {
 enum class IndependentSetStatus {
   NotPrepared,
@@ -22,6 +23,7 @@ enum class IndependentSetStatus {
   SetBudget,
   WordBudget
 };
+
 class IndependentSets {
 public:
   static constexpr size_t memory_budget = 16 * 1024 * 1024;
@@ -34,6 +36,7 @@ private:
   size_t entries = 0, maximum = 0, examined = 0, work = 0;
   IndependentSetStatus state = IndependentSetStatus::NotPrepared;
   void prepare_maximal(std::span<const BitSet<>> adjacency);
+
   bool append(const BitSet<> &set, size_t limit) {
     if (sets.size() == limit) {
       state = limit < pattern_limit ? IndependentSetStatus::MemoryBudget
@@ -51,17 +54,27 @@ public:
   // Rows have matching size, no loops, and symmetric edges. A completed
   // maximal catalogue is reusable for this graph only. Omit the empty set.
   void prepare(std::span<const BitSet<>> adjacency);
+
   bool complete() const noexcept {
     return state == IndependentSetStatus::Complete;
   }
+
   IndependentSetStatus status() const noexcept { return state; }
+
   size_t num_examined() const noexcept { return examined; }
+
   size_t work_used() const noexcept { return work; }
+
   auto begin() const noexcept { return sets.cbegin(); }
+
   auto end() const noexcept { return sets.cend(); }
+
   size_t size() const noexcept { return sets.size(); }
+
   bool empty() const noexcept { return sets.empty(); }
+
   size_t num_entries() const noexcept { return entries; }
+
   size_t maximum_size() const noexcept { return maximum; }
 };
 
@@ -91,9 +104,11 @@ class IndependentSets::MaximalSearch {
     BitSet<> possible, excluded, branches;
     size_t selected = 0;
     bool entered = false;
+
     explicit Frame(size_t nodes)
         : possible(nodes), excluded(nodes), branches(nodes) {}
   };
+
   IndependentSets &output;
   const std::span<const BitSet<>> graph;
   const size_t words, limit;
@@ -108,6 +123,7 @@ class IndependentSets::MaximalSearch {
     output.work += count;
     return true;
   }
+
   bool choose_pivot(const Frame &frame, size_t &pivot) {
     size_t fewest = graph.size() + 1;
     // P and X are disjoint. Minimize the original-neighbor count in P plus
@@ -129,6 +145,7 @@ class IndependentSets::MaximalSearch {
     }
     return true;
   }
+
   bool enter(Frame &frame) {
     // Cover leaf checks, branch-mask construction, and later backtracking.
     if (!charge(6 * words))
@@ -160,6 +177,7 @@ public:
     size_t available = memory_budget - row_bytes - (nodes + 1) * frame_bytes;
     return std::min(pattern_limit, available / row_bytes);
   }
+
   MaximalSearch(IndependentSets &result, std::span<const BitSet<>> adjacency,
                 size_t capacity)
       : output(result), graph(adjacency),
@@ -170,6 +188,7 @@ public:
       stack.emplace_back(adjacency.size());
     stack[0].possible.fill();
   }
+
   void run() {
     size_t depth = 0;
     while (true) {

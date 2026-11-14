@@ -21,11 +21,13 @@ import :reduction_graph;
 namespace pbqp {
 class ReductionWorklist {
   enum class Group { None, LowDegree, Safe, Spill };
+
   struct Priority {
     ReductionCost cost;
     size_t degree = 0;
     size_t id = 0;
   };
+
   struct LessPriority {
     bool operator()(const Priority &a, const Priority &b) const noexcept {
       if (better_reduction_cost(a.cost, b.cost))
@@ -37,6 +39,7 @@ class ReductionWorklist {
       return a.id < b.id;
     }
   };
+
   struct NodeState {
     size_t available = 0;
     size_t denied = 0;
@@ -45,10 +48,12 @@ class ReductionWorklist {
     Priority priority;
     bool dirty = false;
   };
+
   struct Direction {
     size_t worst = 0;
     std::vector<unsigned char> unsafe;
   };
+
   struct EdgeState {
     Direction src;
     Direction tgt;

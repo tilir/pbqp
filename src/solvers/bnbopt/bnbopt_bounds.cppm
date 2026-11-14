@@ -47,6 +47,7 @@ public:
     pbqp_cost_t cutoff = PBQP_INF, priced_cutoff = PBQP_INF;
     bool using_prefix_prices = false, has_priced = false,
          dynamic_prefix = false;
+
     explicit Workspace(const OptimizedBranchAndBoundBounds &bounds)
         : baseline(bounds.reference),
           colored(std::min(bounds.workspace_nodes(), bounds.registers()),
@@ -68,8 +69,10 @@ private:
     return 1 + std::max(workspace_nodes(), std::max(pricing.total_weight(),
                                                     prefix_plan.state_limit));
   }
+
   bool refine_prepared(const size_t *tuple, size_t depth, Workspace &workspace,
                        pbqp_cost_t &cost) const noexcept;
+
   size_t capacity_weight(bool weighted, const Workspace &workspace,
                          size_t id) const noexcept {
     if (!weighted)
@@ -77,20 +80,25 @@ private:
     return workspace.using_prefix_prices ? workspace.prefix.weight(id)
                                          : pricing.weight(id);
   }
+
   bool capacity_bound(bool weighted, Workspace &workspace,
                       pbqp_cost_t &cost) const noexcept;
+
   size_t workspace_nodes() const noexcept {
     return structure.eligible() ? input().num_nodes : 0;
   }
+
   size_t registers() const noexcept {
     return structure.eligible() ? input().nodes[0].num_options - 1 : 0;
   }
+
   bool prepare_terms(const size_t *tuple, size_t depth, Workspace &workspace,
                      pbqp_cost_t &cost) const noexcept;
   bool spill_bound(const BitSet<> &pending, size_t required, bool weighted,
                    Workspace &workspace, pbqp_cost_t &cost) const noexcept;
   bool strengthen(const BitSet<> &clique, Workspace &workspace,
                   pbqp_cost_t &cost) const noexcept;
+
   static void update(Workspace &workspace, size_t state,
                      pbqp_cost_t value) noexcept {
     if (!workspace.next_live[state] || value < workspace.next[state]) {
@@ -102,20 +110,28 @@ private:
 public:
   explicit OptimizedBranchAndBoundBounds(const pbqp_problem &p)
       : reference(p), structure(p, reference.is_pure_interference_problem()) {}
+
   const pbqp_problem &input() const noexcept { return reference.input(); }
+
   const pbqp_problem &domains() const noexcept { return structure.domains(); }
+
   size_t node(size_t step) const noexcept { return structure.node(step); }
+
   size_t option(size_t node, size_t rank) const noexcept {
     return reference.option(node, rank);
   }
+
   void describe_input(Diagnostics log) const {
     describe_bnbopt_input(input(), reference.interference_check(), structure,
                           log);
   }
+
   void describe_structure(Diagnostics log) const {
     describe_bnbopt_structure(structure, log);
   }
+
   void prepare_search() { structure.prepare(); }
+
   void prepare_capacity(Diagnostics log = {}) {
     if (!structure.ready())
       return;
@@ -126,13 +142,19 @@ public:
     describe_bnbopt_capacity(input(), independent, pricing, log);
     describe_bnbopt_prefix_pricing(prefix_plan, log);
   }
+
   const PrefixPricingPlan &prefix_pricing_plan() const noexcept {
     return prefix_plan;
   }
+
   const IndependentSets &patterns() const noexcept { return independent; }
+
   const RegallocPricing &weights() const noexcept { return pricing; }
+
   bool optimized() const noexcept { return structure.ready(); }
+
   const RegallocStructure &graph() const noexcept { return structure; }
+
   bool lower_bound(const size_t *tuple, size_t depth, Workspace &workspace,
                    pbqp_cost_t &cost) const noexcept;
   void prepare_prefix(const size_t *tuple, size_t depth, Workspace &workspace,
@@ -313,6 +335,7 @@ bool OptimizedBranchAndBoundBounds::lower_bound(
     return refine_prepared(tuple, depth, workspace, cost);
   return true;
 }
+
 bool OptimizedBranchAndBoundBounds::refine_prepared(
     const size_t *tuple, size_t depth, Workspace &workspace,
     pbqp_cost_t &cost) const noexcept {

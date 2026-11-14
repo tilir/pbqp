@@ -29,16 +29,19 @@ enum class InterferenceFailure {
   RegisterCost,
   MatrixCost
 };
+
 struct InterferenceCheck {
   InterferenceFailure failure = InterferenceFailure::None;
   size_t node = 0, option = 0, edge = 0, row = 0, col = 0;
   pbqp_cost_t actual = 0, expected = 0;
 };
+
 class BranchAndBoundBounds {
   struct EdgeMinimum {
     size_t row_offset;
     pbqp_cost_t minimum;
   };
+
   const pbqp_problem &problem;
   InterferenceCheck interference;
   std::vector<size_t> offsets;
@@ -53,6 +56,7 @@ public:
   struct Workspace {
     std::vector<unsigned char> allowed;
     std::vector<unsigned char> restricted;
+
     explicit Workspace(const BranchAndBoundBounds &bounds)
         : allowed(bounds.num_options()), restricted(bounds.problem.num_nodes) {}
   };
@@ -78,20 +82,29 @@ private:
 
 public:
   explicit BranchAndBoundBounds(const pbqp_problem &p);
+
   const pbqp_problem &input() const noexcept { return problem; }
+
   const pbqp_problem &domains() const noexcept { return problem; }
+
   size_t node(size_t step) const noexcept { return step; }
+
   bool is_pure_interference_problem() const noexcept {
     return interference.failure == InterferenceFailure::None;
   }
+
   const InterferenceCheck &interference_check() const noexcept {
     return interference;
   }
+
   void prepare_search() noexcept {}
+
   size_t num_options() const noexcept { return offsets.back(); }
+
   size_t option(size_t node, size_t rank) const noexcept {
     return option_order[offsets[node] + rank];
   }
+
   bool lower_bound(const size_t *tuple, size_t depth, Workspace &workspace,
                    pbqp_cost_t &cost) const noexcept;
 };

@@ -26,6 +26,7 @@ typedef struct diagnostic_log {
   unsigned count;
   int invalid;
 } diagnostic_log;
+
 static void record_diagnostic(const char *message, void *data) {
   diagnostic_log *log = (diagnostic_log *)data;
   if (!message || !message[0])
@@ -38,6 +39,7 @@ static int test_dispatch(const pbqp_problem *problem) {
   typedef pbqp_status (*solver_fn)(const pbqp_problem *,
                                    const pbqp_solve_options *, pbqp_solution **,
                                    pbqp_error *);
+
   const struct {
     pbqp_solver kind;
     solver_fn solve;
@@ -47,6 +49,7 @@ static int test_dispatch(const pbqp_problem *problem) {
                  {PBQP_SOLVER_BNBOPT, pbqp_solve_branch_and_bound_optimized, 1},
                  {PBQP_SOLVER_GREEDY, pbqp_solve_greedy, 0},
                  {PBQP_SOLVER_R1R2RN, pbqp_solve_reduction, 0}};
+
   size_t i;
   for (i = 0; i < sizeof(solvers) / sizeof(solvers[0]); ++i) {
     progress_log progress = {0, 0};

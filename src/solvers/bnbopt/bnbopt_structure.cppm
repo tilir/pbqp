@@ -65,27 +65,41 @@ public:
       : problem(p), supported(pure_interference && p.num_nodes &&
                               fits_storage(p.num_nodes)),
         best_clique(supported ? p.num_nodes : 0) {}
+
   RegallocStructure(const RegallocStructure &) = delete;
   RegallocStructure &operator=(const RegallocStructure &) = delete;
   void prepare();
+
   size_t greedy_starts_used() const noexcept { return starts_used; }
+
   size_t clique_steps() const noexcept { return refinement_steps; }
+
   bool clique_budget_hit() const noexcept {
     return refinement_steps == clique_budget;
   }
+
   bool word_budget_hit() const noexcept { return remaining_work == 0; }
+
   size_t omitted_cliques() const noexcept { return omitted; }
+
   bool uses_adaptive_tail() const noexcept { return adaptive_tail; }
+
   bool eligible() const noexcept { return supported; }
+
   bool ready() const noexcept { return prepared; }
+
   size_t node(size_t step) const noexcept {
     return prepared ? order[step] : step;
   }
+
   std::span<const BitSet<>> adjacency() const noexcept { return adjacent; }
+
   const BitSet<> &neighbors(size_t node) const noexcept {
     return adjacent[node];
   }
+
   const std::vector<BitSet<>> &cliques() const noexcept { return clique_sets; }
+
   const pbqp_problem &domains() const noexcept {
     return prepared ? enumeration : problem;
   }

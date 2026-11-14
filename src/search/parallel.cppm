@@ -29,6 +29,7 @@ void run_parallel(std::size_t count, Consumer consumer) {
       },
       nullptr);
 }
+
 // The failure callback wakes consumers blocked in a dynamic work queue before
 // the scheduler waits for them. The context remains borrowed until all join.
 template <typename Consumer, typename Cancel>
@@ -37,6 +38,7 @@ void run_parallel(std::size_t count, Consumer consumer, Cancel cancel) {
     Consumer &consumer;
     Cancel &cancel;
   } context{consumer, cancel};
+
   run_parallel(
       count, &context,
       [](void *raw, std::size_t index) {

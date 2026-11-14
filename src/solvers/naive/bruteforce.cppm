@@ -36,8 +36,10 @@ public:
   BruteForceSearch(const pbqp_problem &p, pbqp_progress_callback callback,
                    void *data) noexcept
       : problem(p), progress(callback), user_data(data) {}
+
   void prepare();
   pbqp_status run(pbqp_error *error) noexcept;
+
   pbqp_solution *release_solution() noexcept { return solution.release(); }
 };
 

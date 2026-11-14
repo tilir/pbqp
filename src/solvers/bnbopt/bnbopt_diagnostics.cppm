@@ -18,6 +18,7 @@ import :bnbopt_structure;
 import :independent_sets;
 import :bnbopt_pricing;
 import :bnbopt_prefix_pricing;
+
 namespace pbqp {
 void describe_bnbopt_input(const pbqp_problem &p,
                            const InterferenceCheck &check,

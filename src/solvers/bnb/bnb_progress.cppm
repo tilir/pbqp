@@ -29,6 +29,7 @@ class BranchAndBoundProgress {
     while (next_percent <= percent)
       callback(next_percent++, user_data);
   }
+
   void merge(double work, double skipped) noexcept {
     std::scoped_lock lock(mutex);
     completed += work;
@@ -54,8 +55,11 @@ public:
 
   public:
     explicit Accumulator(BranchAndBoundProgress &p) : owner(p) {}
+
     void completed(double weight) noexcept { add(weight, false); }
+
     void discarded(double weight) noexcept { add(weight, true); }
+
     void flush() noexcept {
       if (!events)
         return;
@@ -67,6 +71,7 @@ public:
 
   BranchAndBoundProgress(pbqp_progress_callback cb, void *data)
       : callback(cb), user_data(data) {}
+
   void finish() noexcept {
     std::scoped_lock lock(mutex);
     report(100);

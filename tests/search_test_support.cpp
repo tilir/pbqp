@@ -122,6 +122,7 @@ struct Progress {
   unsigned count = 0;
   bool invalid = false;
 };
+
 void report(unsigned percent, void *data) noexcept {
   auto &progress = *static_cast<Progress *>(data);
   progress.invalid |= percent != ++progress.count || percent > 100;
@@ -172,6 +173,7 @@ void test_root_seed_policy() {
   pbqp_problem loose{3, 3, nodes, edges};
   check_seed_policy(loose, true, true, PBQP_OK, 1);
 }
+
 void test_dispatch_failure() {
   pbqp::AdaptivePlan plan;
   plan.tasks.push_back({});
@@ -225,10 +227,12 @@ void test_runtime_donation() {
   workers.reserve(2);
   for (size_t id = 0; id < 2; ++id)
     workers.emplace_back(bounds, incumbent);
+
   struct CallbackLog {
     std::atomic<unsigned> count{0};
     std::atomic<bool> invalid{false}, entered{false};
   } log;
+
   auto callback = [](unsigned value, void *data) noexcept {
     auto &p = *static_cast<CallbackLog *>(data);
     if (p.entered.exchange(true))

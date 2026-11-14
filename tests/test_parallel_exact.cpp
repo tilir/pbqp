@@ -25,26 +25,31 @@ import pbqp.generator;
 
 namespace {
 std::string context;
+
 void check(bool condition,
            std::source_location location = std::source_location::current()) {
   if (!condition)
     throw std::runtime_error(std::string(location.file_name()) + ":" +
                              std::to_string(location.line()) + " " + context);
 }
+
 using SolutionPtr =
     std::unique_ptr<pbqp_solution, decltype([](pbqp_solution *s) noexcept {
                       pbqp_solution_free(s);
                     })>;
+
 struct Progress {
   std::atomic<bool> active{false};
   std::atomic<unsigned> count{0};
   std::atomic<bool> invalid{false};
 };
+
 void record_diagnostic(const char *message, void *data) noexcept {
   auto &text = *static_cast<std::string *>(data);
   text += message;
   text += '\n';
 }
+
 void report(unsigned percent, void *data) noexcept {
   auto &log = *static_cast<Progress *>(data);
   if (log.active.exchange(true))

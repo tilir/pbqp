@@ -43,6 +43,7 @@ struct PrefixTask {
   size_t child_end = 0;
   double progress_weight = 0;
 };
+
 struct PrefixPlan {
   std::vector<PrefixTask> tasks;
   std::vector<size_t> covered_depths;

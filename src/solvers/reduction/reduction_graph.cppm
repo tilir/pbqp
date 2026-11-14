@@ -56,6 +56,7 @@ public:
     std::vector<size_t> edges;
     bool active = true;
   };
+
   struct Edge {
     size_t src;
     size_t tgt;
@@ -63,6 +64,7 @@ public:
     size_t tgt_position;
     std::vector<ReductionCost> costs;
   };
+
   static constexpr size_t no_edge = std::numeric_limits<size_t>::max();
 
 private:
@@ -76,16 +78,25 @@ private:
 
 public:
   explicit ReductionGraph(const pbqp_problem &problem);
+
   Node &node(size_t id) noexcept { return nodes[id]; }
+
   const Node &node(size_t id) const noexcept { return nodes[id]; }
+
   size_t num_nodes() const noexcept { return nodes.size(); }
+
   size_t num_edges() const noexcept { return edges.size(); }
+
   size_t source(size_t edge) const noexcept { return edges[edge].src; }
+
   size_t target(size_t edge) const noexcept { return edges[edge].tgt; }
+
   size_t degree(size_t id) const noexcept { return nodes[id].edges.size(); }
+
   size_t other(size_t edge, size_t id) const noexcept {
     return edges[edge].src == id ? edges[edge].tgt : edges[edge].src;
   }
+
   ReductionCost cost(size_t edge, size_t node, size_t option,
                      size_t other_option) const noexcept;
   size_t find_edge(size_t src, size_t tgt) const noexcept;

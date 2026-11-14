@@ -50,6 +50,8 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
   prefer functions, templates, and typed constants.
 - Format C, C++, and `.cppm` with `clang-format-21` and root `.clang-format` only
   (LLVM style, two spaces, no tabs).
+- Separate function, class, and struct definitions with a blank line; keep
+  `SeparateDefinitionBlocks: Always` enabled in the formatter configuration.
 
 ## CMake and dependencies
 

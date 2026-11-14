@@ -23,6 +23,7 @@ import :independent_sets;
 import :bitset;
 import :ownership;
 import :evaluation;
+
 namespace pbqp {
 class RegisterCoverSeed {
 public:
@@ -62,9 +63,13 @@ public:
   RegisterCoverSeed(const pbqp_problem &input, const IndependentSets &sets);
   ~RegisterCoverSeed() noexcept;
   bool run(pbqp_cost_t target = 0) noexcept;
+
   bool enabled() const noexcept { return supported; }
+
   size_t work_used() const noexcept { return work; }
+
   size_t restarts_used() const noexcept { return restarts; }
+
   const pbqp_solution &solution() const noexcept { return *best; }
 };
 

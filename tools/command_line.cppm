@@ -72,14 +72,18 @@ public:
   }
 
   bool help() const noexcept { return help_requested; }
+
   const std::vector<std::string_view> &positional() const noexcept {
     return paths;
   }
+
   bool has(std::string_view name) const { return options.contains(name); }
+
   std::string_view get(std::string_view name, std::string_view fallback) const {
     auto option = options.find(name);
     return option == options.end() ? fallback : option->second;
   }
+
   std::string_view require(std::string_view name) const {
     auto option = options.find(name);
     if (option == options.end())
