@@ -13,6 +13,7 @@
 module;
 #include "pbqp.h"
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 module pbqp:bnbopt_bounds;
@@ -21,6 +22,7 @@ import :bnb_bounds;
 import :bnbopt_structure;
 import :independent_sets;
 import :bnbopt_pricing;
+import :bnbopt_prefix_pricing;
 import :diagnostics;
 import :bnbopt_diagnostics;
 
@@ -30,6 +32,7 @@ class OptimizedBranchAndBoundBounds {
   RegallocStructure structure;
   IndependentSets independent;
   RegallocPricing pricing;
+  PrefixPricingPlan prefix_plan;
 
 public:
   struct Workspace {
@@ -38,6 +41,12 @@ public:
     std::vector<pbqp_cost_t> terms, current, next;
     std::vector<unsigned char> current_live, next_live, has_register;
     BitSet<> assigned, pending, colors;
+    PrefixPriceOptimizer prefix;
+    std::vector<size_t> priced_options;
+    size_t priced_depth = 0;
+    pbqp_cost_t cutoff = PBQP_INF, priced_cutoff = PBQP_INF;
+    bool using_prefix_prices = false, has_priced = false,
+         dynamic_prefix = false;
     explicit Workspace(const OptimizedBranchAndBoundBounds &bounds)
         : baseline(bounds.reference),
           colored(std::min(bounds.workspace_nodes(), bounds.registers()),
@@ -48,12 +57,25 @@ public:
           next_live(bounds.state_count()),
           has_register(bounds.workspace_nodes()),
           assigned(bounds.workspace_nodes()), pending(bounds.workspace_nodes()),
-          colors(bounds.registers()) {}
+          colors(bounds.registers()),
+          prefix(bounds.input(), bounds.independent, bounds.pricing,
+                 bounds.registers(), bounds.prefix_plan),
+          priced_options(prefix.enabled() ? bounds.input().num_nodes : 0) {}
   };
 
 private:
   size_t state_count() const noexcept {
-    return std::max(workspace_nodes() + 1, pricing.total_weight() + 1);
+    return 1 + std::max(workspace_nodes(), std::max(pricing.total_weight(),
+                                                    prefix_plan.state_limit));
+  }
+  bool refine_prepared(const size_t *tuple, size_t depth, Workspace &workspace,
+                       pbqp_cost_t &cost) const noexcept;
+  size_t capacity_weight(bool weighted, const Workspace &workspace,
+                         size_t id) const noexcept {
+    if (!weighted)
+      return 1;
+    return workspace.using_prefix_prices ? workspace.prefix.weight(id)
+                                         : pricing.weight(id);
   }
   bool capacity_bound(bool weighted, Workspace &workspace,
                       pbqp_cost_t &cost) const noexcept;
@@ -99,7 +121,13 @@ public:
       return;
     independent.prepare(structure.adjacency());
     pricing.prepare(input(), independent);
+    prefix_plan =
+        plan_prefix_pricing(input(), independent, pricing, registers());
     describe_bnbopt_capacity(input(), independent, pricing, log);
+    describe_bnbopt_prefix_pricing(prefix_plan, log);
+  }
+  const PrefixPricingPlan &prefix_pricing_plan() const noexcept {
+    return prefix_plan;
   }
   const IndependentSets &patterns() const noexcept { return independent; }
   const RegallocPricing &weights() const noexcept { return pricing; }
@@ -107,6 +135,8 @@ public:
   const RegallocStructure &graph() const noexcept { return structure; }
   bool lower_bound(const size_t *tuple, size_t depth, Workspace &workspace,
                    pbqp_cost_t &cost) const noexcept;
+  void prepare_prefix(const size_t *tuple, size_t depth, Workspace &workspace,
+                      pbqp_cost_t cutoff) const noexcept;
 };
 
 bool OptimizedBranchAndBoundBounds::prepare_terms(
@@ -174,7 +204,7 @@ bool OptimizedBranchAndBoundBounds::spill_bound(
     std::fill_n(workspace.next_live.begin(), required + 1, false);
     auto spill = input().nodes[id].costs[0];
     bool has_register = workspace.has_register[id];
-    size_t weight = weighted ? pricing.weight(id) : 1;
+    size_t weight = capacity_weight(weighted, workspace, id);
     for (size_t state = 0; state <= required; ++state) {
       if (!workspace.current_live[state])
         continue;
@@ -226,7 +256,7 @@ bool OptimizedBranchAndBoundBounds::capacity_bound(
   pending.subtract(workspace.assigned);
   size_t total = 0, capacity = 0;
   for (size_t id = pending.first(); id < pending.size(); id = pending.next(id))
-    total += weighted ? pricing.weight(id) : 1;
+    total += capacity_weight(weighted, workspace, id);
   if (!total)
     return true;
   for (size_t color = 0; color < registers(); ++color) {
@@ -242,7 +272,7 @@ bool OptimizedBranchAndBoundBounds::capacity_bound(
       for (size_t id = pattern.first(); id < pattern.size();
            id = pattern.next(id))
         if (pending.test(id) && workspace.allowed[id].test(color))
-          available += weighted ? pricing.weight(id) : 1;
+          available += capacity_weight(weighted, workspace, id);
       best = std::max(best, available);
     }
     if (best >= total - capacity)
@@ -259,6 +289,15 @@ bool OptimizedBranchAndBoundBounds::lower_bound(
     return reference.lower_bound(tuple, depth, workspace.baseline, cost);
   if (!prepare_terms(tuple, depth, workspace, cost))
     return false;
+  if (workspace.prefix.available()) {
+    workspace.using_prefix_prices = true;
+    const bool possible = capacity_bound(true, workspace, cost);
+    workspace.using_prefix_prices = false;
+    if (!possible)
+      return false;
+    if (std::isfinite(workspace.cutoff) && cost >= workspace.cutoff)
+      return true;
+  }
   if (independent.complete()) {
     if (pricing.ready() && !capacity_bound(true, workspace, cost))
       return false;
@@ -270,6 +309,65 @@ bool OptimizedBranchAndBoundBounds::lower_bound(
       return false;
   // Feasible edge terms are all zero in this verified shape. They cannot
   // change the numerical unary sum; the final result uses the shared evaluator.
+  if (workspace.dynamic_prefix && cost < workspace.cutoff)
+    return refine_prepared(tuple, depth, workspace, cost);
   return true;
 }
+bool OptimizedBranchAndBoundBounds::refine_prepared(
+    const size_t *tuple, size_t depth, Workspace &workspace,
+    pbqp_cost_t &cost) const noexcept {
+  const auto cutoff = workspace.cutoff;
+  auto &optimizer = workspace.prefix;
+  if (!optimizer.enabled() || !std::isfinite(cutoff) ||
+      depth == input().num_nodes || depth < structure.cliques().front().count())
+    return true;
+  if (workspace.has_priced && depth >= workspace.priced_depth &&
+      depth - workspace.priced_depth < PrefixPriceOptimizer::refresh_depth &&
+      cutoff >= workspace.priced_cutoff) {
+    bool same = true;
+    for (size_t step = 0; step < workspace.priced_depth; ++step)
+      same &= tuple[node(step)] == workspace.priced_options[step];
+    if (same)
+      return true;
+  }
+  if (!optimizer.begin(workspace.colored, workspace.assigned))
+    return true;
+  workspace.priced_depth = depth;
+  workspace.priced_cutoff = cutoff;
+  workspace.has_priced = true;
+  for (size_t step = 0; step < depth; ++step)
+    workspace.priced_options[step] = tuple[node(step)];
+  for (double temperature : PriceOptimizer::temperatures) {
+    if (!optimizer.relax(temperature))
+      break;
+    if (!optimizer.quantize())
+      continue;
+    // The real dual score never prunes. Test the committed integer weights
+    // with the original-order DP, including fixed spill and overflow terms.
+    pbqp_cost_t candidate = 0;
+    for (pbqp_cost_t term : workspace.terms)
+      candidate = pbqp_cost_add(candidate, term);
+    workspace.using_prefix_prices = true;
+    const bool possible = capacity_bound(true, workspace, candidate);
+    workspace.using_prefix_prices = false;
+    if (!possible)
+      return false;
+    cost = std::max(cost, candidate);
+    if (cost >= cutoff)
+      break;
+  }
+  return true;
+}
+
+void OptimizedBranchAndBoundBounds::prepare_prefix(
+    const size_t *tuple, size_t depth, Workspace &workspace,
+    pbqp_cost_t cutoff) const noexcept {
+  if (!workspace.prefix.enabled())
+    return;
+  workspace.dynamic_prefix = true;
+  workspace.cutoff = cutoff;
+  pbqp_cost_t bound;
+  lower_bound(tuple, depth, workspace, bound);
+}
+
 } // namespace pbqp

@@ -26,6 +26,7 @@ import :error;
 import :evaluation;
 import :greedy;
 import :reduction;
+import :bnbopt_cover;
 import :diagnostics;
 namespace pbqp {
 // Called only after preparation, before workers start. Cached frontier bounds
@@ -58,7 +59,7 @@ void describe_preliminary_bounds(const AdaptivePlan &plan,
 template <typename Bounds = BranchAndBoundBounds> class BranchAndBoundSearch {
 public:
   struct SeedStatistics {
-    bool greedy = false, reduction = false;
+    bool greedy = false, reduction = false, cover = false;
   };
 
 private:
@@ -77,6 +78,7 @@ private:
   SeedStatistics seeds;
 
   void seed_incumbent(pbqp_cost_t root_bound);
+  void seed_cover(pbqp_cost_t root_bound);
   void prepare_plan();
   void finish(size_t index) {
     queue->completed();
@@ -134,6 +136,35 @@ void BranchAndBoundSearch<Bounds>::seed_incumbent(pbqp_cost_t root_bound) {
   }
 }
 
+template <typename Bounds>
+void BranchAndBoundSearch<Bounds>::seed_cover(pbqp_cost_t root_bound) {
+  if constexpr (requires { bounds.patterns(); }) {
+    if (!bounds.patterns().complete() || bounds.patterns().empty())
+      return;
+    seeds.cover = true;
+    diagnostics.line("bnbopt: catalogue seed limits: restarts=",
+                     RegisterCoverSeed::restart_limit,
+                     "; pattern-vertex work=", RegisterCoverSeed::work_budget,
+                     "; pair candidates=", RegisterCoverSeed::pair_candidates);
+    RegisterCoverSeed cover(bounds.input(), bounds.patterns());
+    if (!cover.run(root_bound)) {
+      if (!cover.enabled())
+        diagnostics.line("bnbopt: catalogue seed disabled: finite nonnegative "
+                         "spills required");
+      else
+        diagnostics.line("bnbopt: catalogue seed unavailable: work budget "
+                         "exhausted before a complete candidate");
+      return;
+    }
+    const auto &seed = cover.solution();
+    incumbent.update(seed.options, seed.cost);
+    diagnostics.line("bnbopt: catalogue seed: cost=", seed.cost,
+                     "; restarts=", cover.restarts_used(),
+                     "; pattern-vertex work=", cover.work_used(), "/",
+                     RegisterCoverSeed::work_budget);
+  }
+}
+
 template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare_plan() {
   diagnostics.line(
       "search: requested threads=", requested_threads,
@@ -174,6 +205,19 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare_plan() {
       return;
     }
     bounds.prepare_capacity(diagnostics);
+    typename Bounds::Workspace capacity(bounds);
+    if (!bounds.lower_bound(nullptr, 0, capacity, lower) ||
+        !incumbent.can_improve(lower)) {
+      diagnostics.line(
+          "search: capacity bound closes root; further seeds unnecessary");
+      plan.covered_depths.push_back(0);
+      return;
+    }
+    seed_cover(lower);
+    if (!incumbent.can_improve(lower)) {
+      plan.covered_depths.push_back(0);
+      return;
+    }
   }
   PrefixPlanner<Bounds> planner(bounds, incumbent);
   plan = planner.build(settings);

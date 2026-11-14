@@ -126,6 +126,12 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
   original unary in order, preserve reachability, and combine overlapping bounds
   by maximum. Double pricing chooses auxiliary nonnegative integer weights only;
   it is never a pruning cost. Check quantization and capacity sums before use.
+- Structural B&B may seed from that same catalogue using bounded primal coverage.
+  Prefix repricing owns preallocated worker scratch, keeps root weights available,
+  and only adds integer-capacity/original-order DP constraints. Never prune on
+  the conditional real dual or regroup fixed float costs. Cached bounds remain
+  valid when auxiliary weight vectors change. Report preparation eligibility
+  and budgets outside DFS; keep live refinement private and allocation-free.
 - Enumerate complete maximal independent sets directly for capacity. Partial
   catalogues are unsafe: discard them on any storage/set/work limit and retain
   valid weaker bounds. Keep all-subset reference enumeration strictly in tests

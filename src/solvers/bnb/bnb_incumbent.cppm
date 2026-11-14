@@ -36,6 +36,12 @@ public:
     return !feasible.load(std::memory_order_acquire) ||
            bound < upper_bound.load(std::memory_order_acquire);
   }
+  pbqp_cost_t cost_limit() const noexcept {
+    // This is only a bound-work cutoff, not assignment publication. A stale
+    // cost weakens the optional refinement; can_improve still checks
+    // feasibility.
+    return upper_bound.load(std::memory_order_relaxed);
+  }
   bool found() const noexcept {
     // Acquire pairs with publishing the first complete feasible incumbent.
     return feasible.load(std::memory_order_acquire);

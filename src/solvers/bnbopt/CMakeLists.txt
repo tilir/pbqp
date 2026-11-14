@@ -3,6 +3,8 @@
 # See LICENSE for the full license text.
 
 set(PBQP_COMPONENT_MODULES
+  bnbopt_cover.cppm
+  bnbopt_prefix_pricing.cppm
   bnbopt_pricing.cppm
   bnbopt_diagnostics.cppm
   bnbopt_bounds.cppm

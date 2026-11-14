@@ -11,6 +11,7 @@
 module;
 #include "pbqp.h"
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <source_location>
@@ -25,6 +26,7 @@ import :bnb_progress;
 import :bnb_worker;
 import :bnb_work_queue;
 import :parallel;
+import :bnbopt_bounds;
 
 namespace {
 void check(bool condition,
@@ -221,6 +223,94 @@ void test_new_incumbent() {
   check(log.count == 100 && !log.invalid);
 }
 
+class CountingPriceBounds : public pbqp::OptimizedBranchAndBoundBounds {
+public:
+  using pbqp::OptimizedBranchAndBoundBounds::OptimizedBranchAndBoundBounds;
+  mutable std::atomic<size_t> priced_checks{0};
+  bool lower_bound(const size_t *tuple, size_t depth, Workspace &workspace,
+                   pbqp_cost_t &cost) const noexcept {
+    const bool possible = pbqp::OptimizedBranchAndBoundBounds::lower_bound(
+        tuple, depth, workspace, cost);
+    if (workspace.prefix.available())
+      ++priced_checks;
+    return possible;
+  }
+};
+
+void test_priced_donation() {
+  constexpr size_t count = 10, domain = 3;
+  std::vector<std::array<pbqp_cost_t, domain>> costs(count);
+  std::vector<pbqp_node> nodes;
+  pbqp_cost_t all_spill = 0;
+  for (size_t id = 0; id < count; ++id) {
+    costs[id][0] = 10 + static_cast<pbqp_cost_t>(id) / 4;
+    all_spill += costs[id][0];
+    nodes.push_back({domain, costs[id].data()});
+  }
+  pbqp_cost_t matrix[] = {0, 0, 0, 0, PBQP_INF, 0, 0, 0, PBQP_INF};
+  std::vector<pbqp_edge> edges;
+  for (size_t base : {size_t{0}, size_t{5}})
+    for (size_t id = 0; id < 5; ++id) {
+      const size_t src = base + id, tgt = base + (id + 1) % 5;
+      edges.push_back({std::min(src, tgt), std::max(src, tgt), matrix});
+    }
+  pbqp_problem problem{count, edges.size(), nodes.data(), edges.data()};
+  CountingPriceBounds bounds(problem);
+  bounds.prepare_search();
+  bounds.prepare_capacity();
+  check(bounds.weights().ready());
+  pbqp::BranchAndBoundIncumbent incumbent(count);
+  std::vector<size_t> seed(count);
+  incumbent.update(seed.data(), all_spill);
+  pbqp::AdaptivePlan plan;
+  plan.tasks.resize(1);
+  plan.tasks[0].task.progress_weight = 1;
+  pbqp::CoarseWorkQueue queue(count, 2, plan);
+  std::vector<pbqp::BranchAndBoundWorker<CountingPriceBounds>> workers;
+  workers.reserve(2);
+  for (size_t id = 0; id < 2; ++id)
+    workers.emplace_back(bounds, incumbent, true);
+  ProgressLog log;
+  pbqp::BranchAndBoundProgress progress(ProgressLog::report, &log);
+  std::vector<RecordingProgress> pending;
+  pending.reserve(2);
+  for (size_t id = 0; id < 2; ++id)
+    pending.emplace_back(progress);
+  std::atomic<bool> first{true};
+  std::vector<size_t> donations(2);
+  pbqp::run_parallel(
+      2,
+      [&](size_t id) {
+        auto &worker = workers[id];
+        pbqp_cost_t bound;
+        while (queue.take(worker.task, bound)) {
+          if (first.exchange(false))
+            while (!queue.wants_work() && !queue.cancelled())
+              std::this_thread::yield();
+          worker.start(bound);
+          while (!worker.chunk(1, pending[id]))
+            if (worker.share(queue))
+              ++donations[id];
+          queue.completed();
+          pending[id].pending.flush();
+        }
+      },
+      [&]() noexcept { queue.cancel(); });
+  // Each disjoint odd cycle needs one spill. Spilling its cheapest vertex
+  // attains 10 + 11.25, independently of both the pricing and capacity DP.
+  check(incumbent.result().cost == 21.25f);
+  pbqp_evaluation evaluation{};
+  check(pbqp_evaluate_assignment(&problem, incumbent.result().options, count,
+                                 &evaluation, nullptr) == PBQP_OK);
+  check(evaluation.is_feasible && evaluation.cost == 21.25f);
+  check(bounds.priced_checks > 0 && donations[0] + donations[1] > 0);
+  const double accounted = pending[0].work + pending[0].skipped +
+                           pending[1].work + pending[1].skipped;
+  check(std::abs(accounted - 1) < 1e-12);
+  progress.finish();
+  check(log.count == 100 && !log.invalid);
+}
+
 void test_progress_donation() {
   FilteredTree bounds(true);
   pbqp::BranchAndBoundIncumbent incumbent(4);
@@ -278,5 +368,6 @@ extern "C++" void run_bnb_progress_tests() {
   test_empty_jobs();
   test_new_incumbent();
   test_progress_donation();
+  test_priced_donation();
 }
 } // namespace pbqp

@@ -280,6 +280,13 @@ Optional `BranchAndBoundOpt/Example06`, `/Example07`, `/Example08`, and `/Exampl
 Benchmark cases compare thread counts and heartbeat overhead. The [optimization guide](bnbopts.md) lists the additional assumptions, bounds,
 preparation budgets, and fallbacks, with reproducible benchmark commands.
 
+The optimized solver also builds a bounded independent-set coverage seed and
+refines auxiliary prices for the current prefix in private worker storage.
+Root weights remain available, and all pruning still uses integer capacities
+with reference-order float DP. See [sections 6 and 7 of the optimization
+guide](bnbopts.md#6-seed-from-independent-set-coverage) for eligibility, budgets,
+and the conditional dual. Baseline `bnb` does not use these structural paths.
+
 ## Verbose diagnostics
 
 `--verbose` is a valueless flag for every solver. It writes the solver name,

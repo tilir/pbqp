@@ -34,6 +34,8 @@ module;
 module pbqp;
 import :bitset;
 import :bnbopt_bounds;
+import :bnbopt_cover;
+import :bnbopt_prefix_pricing;
 import :bnb_bounds;
 import :independent_sets;
 import :bnbopt_pricing;
@@ -139,7 +141,7 @@ void check_graph(const pbqp::OptimizedBranchAndBoundBounds &bounds) {
     check(order[id] == id);
 }
 
-void test_prefix_bounds(bool positive = false) {
+void test_prefix_bounds(bool positive = false, bool conditioned = false) {
   const auto maximum = std::numeric_limits<pbqp_cost_t>::max();
   const std::vector<pbqp_cost_t> pool =
       positive ? std::vector<pbqp_cost_t>{0.1f, 0.2f, 1.25f, 3.5f, 10, 100}
@@ -157,7 +159,7 @@ void test_prefix_bounds(bool positive = false) {
                      std::numeric_limits<pbqp_cost_t>::denorm_min(),
                      PBQP_INF};
   bool reordered = false;
-  size_t priced = 0;
+  size_t priced = 0, refined = 0;
   for (unsigned seed = 0; seed < 60; ++seed) {
     context = "optimized prefix seed=" + std::to_string(seed);
     std::mt19937 random(seed);
@@ -193,6 +195,14 @@ void test_prefix_bounds(bool positive = false) {
     std::vector<size_t> tuple(nodes.size());
     std::function<void(size_t, size_t)> prefix = [&](size_t depth,
                                                      size_t used) {
+      if (conditioned) {
+        bounds.prepare_prefix(tuple.data(), depth, workspace, maximum);
+        refined += workspace.prefix.available();
+        // Keep the oracle check independent of a pruning cutoff. Learned
+        // weights must remain valid after backtracking and at unrelated
+        // prefixes.
+        workspace.cutoff = PBQP_INF;
+      }
       check_prefix(problem, bounds, workspace, tuple, depth);
       if (depth == nodes.size())
         return;
@@ -204,10 +214,208 @@ void test_prefix_bounds(bool positive = false) {
       }
     };
     prefix(0, 0);
+    if (conditioned) {
+      check_prefix(problem, bounds, workspace, tuple, 0);
+      pbqp::RegisterCoverSeed cover(problem, bounds.patterns());
+      check(cover.run());
+      const auto &solution = cover.solution();
+      const std::vector<size_t> options(solution.options,
+                                        solution.options + solution.num_nodes);
+      pbqp_cost_t cost;
+      check(evaluate(problem, options, cost) && cost == solution.cost);
+      check(cover.work_used() <= pbqp::RegisterCoverSeed::work_budget);
+      check(cover.restarts_used() <= pbqp::RegisterCoverSeed::restart_limit);
+    }
   }
+  if (conditioned)
+    check(refined > 0);
   check(reordered);
   if (positive)
     check(priced > 0);
+}
+
+void test_cover_costs() {
+  context = "catalogue seed cost and fallback contracts";
+  constexpr size_t count = 6;
+  const pbqp_cost_t maximum = std::numeric_limits<pbqp_cost_t>::max();
+  for (pbqp_cost_t spill :
+       {pbqp_cost_t{0.1f}, maximum, PBQP_INF, pbqp_cost_t{-1}}) {
+    std::vector<std::array<pbqp_cost_t, 2>> unary(count, {spill, 0});
+    std::vector<pbqp_node> nodes;
+    for (const auto &costs : unary)
+      nodes.push_back({2, costs.data()});
+    pbqp_cost_t matrix[] = {0, 0, 0, PBQP_INF};
+    std::vector<pbqp_edge> edges;
+    for (size_t base : {size_t{0}, size_t{3}})
+      for (size_t src = base; src < base + 3; ++src)
+        for (size_t tgt = src + 1; tgt < base + 3; ++tgt)
+          edges.push_back({src, tgt, matrix});
+    pbqp_problem problem{count, edges.size(), nodes.data(), edges.data()};
+    pbqp::OptimizedBranchAndBoundBounds bounds(problem);
+    bounds.prepare_search();
+    bounds.prepare_capacity();
+    pbqp::RegisterCoverSeed seed(problem, bounds.patterns());
+    const bool supported = std::isfinite(spill) && spill >= 0;
+    check(seed.enabled() == supported && seed.run() == supported);
+    if (!supported)
+      continue;
+    const auto &solution = seed.solution();
+    std::vector<size_t> tuple(solution.options, solution.options + count);
+    pbqp_cost_t cost;
+    check(evaluate(problem, tuple, cost) && cost == solution.cost);
+    check(solution.quality == PBQP_SOLUTION_FEASIBLE);
+    if (spill == maximum)
+      check(cost == PBQP_INF);
+    // The seed must leave every original unary entry unchanged.
+    for (const auto &costs : unary)
+      check(costs[0] == spill && costs[1] == 0);
+  }
+}
+
+void test_zero_price_scratch_budget() {
+  context = "zero-cost nodes do not consume the prefix conversion budget";
+  constexpr size_t cycle = 5, count = 14;
+  std::vector<std::array<pbqp_cost_t, 3>> unary(count);
+  std::vector<pbqp_node> nodes;
+  for (size_t id = 0; id < count; ++id) {
+    unary[id][0] = id < cycle ? 0.2f : 0;
+    nodes.push_back({3, unary[id].data()});
+  }
+  pbqp_cost_t matrix[] = {0, 0, 0, 0, PBQP_INF, 0, 0, 0, PBQP_INF};
+  std::vector<pbqp_edge> edges;
+  for (size_t id = 0; id < cycle; ++id) {
+    const size_t other = (id + 1) % cycle;
+    edges.push_back({std::min(id, other), std::max(id, other), matrix});
+  }
+  pbqp_problem problem{count, edges.size(), nodes.data(), edges.data()};
+  pbqp::OptimizedBranchAndBoundBounds bounds(problem);
+  bounds.prepare_search();
+  bounds.prepare_capacity();
+  check(bounds.weights().ready());
+  pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
+  check(workspace.prefix.state_limit() < count / 2);
+  std::vector<size_t> tuple(count);
+  tuple[bounds.node(0)] = 1;
+  tuple[bounds.node(1)] = 2;
+  bounds.prepare_prefix(tuple.data(), 2, workspace, 1);
+  check(workspace.prefix.available());
+  check(workspace.prefix.total_weight() <= workspace.prefix.state_limit());
+  workspace.cutoff = PBQP_INF;
+  pbqp_cost_t lower;
+  check(bounds.lower_bound(tuple.data(), 2, workspace, lower));
+  // The isolated zero-cost vertices may all spill. Exactly one cycle spill
+  // is necessary and sufficient, irrespective of their option assignments.
+  check(lower <= 0.2f);
+}
+
+void test_prefix_high_register() {
+  context = "conditioned prices across node and register word boundaries";
+  constexpr size_t cycle = 5, clique = 65, count = cycle + clique;
+  constexpr size_t registers = clique + 1, domain = registers + 1;
+  std::vector<pbqp_cost_t> unary(domain);
+  unary[0] = 100;
+  std::vector<pbqp_node> nodes(count, pbqp_node{domain, unary.data()});
+  std::vector<pbqp_cost_t> matrix(domain * domain);
+  for (size_t color = 1; color <= registers; ++color)
+    matrix[color * domain + color] = PBQP_INF;
+  std::vector<pbqp_edge> edges;
+  for (size_t src = 0; src < count; ++src)
+    for (size_t tgt = src + 1; tgt < count; ++tgt)
+      if (tgt >= cycle || tgt == src + 1 || (src == 0 && tgt == cycle - 1))
+        edges.push_back({src, tgt, matrix.data()});
+  pbqp_problem problem{nodes.size(), edges.size(), nodes.data(), edges.data()};
+  pbqp::OptimizedBranchAndBoundBounds bounds(problem);
+  bounds.prepare_search();
+  bounds.prepare_capacity();
+  check(bounds.weights().ready());
+  pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
+  check(workspace.prefix.enabled());
+  const size_t depth = bounds.graph().cliques().front().count();
+  check(depth == clique + 2);
+  std::vector<size_t> tuple(count);
+  size_t introduced = 0;
+  for (size_t step = 0; step < depth; ++step)
+    tuple[bounds.node(step)] = step == depth - 1 ? 0 : ++introduced;
+  check(introduced == registers);
+  bounds.prepare_prefix(tuple.data(), depth, workspace, 1000);
+  check(workspace.prefix.available());
+  workspace.cutoff = PBQP_INF;
+  pbqp_cost_t lower;
+  check(bounds.lower_bound(tuple.data(), depth, workspace, lower));
+  bool found = false;
+  pbqp_cost_t best = 0;
+  // All 65 clique nodes are universal to the cycle and occupy distinct
+  // registers. Thus the remaining cycle nodes can use only spill or the
+  // 66th register. Exhaust these original-graph feasible domain possibilities.
+  std::function<void(size_t)> complete = [&](size_t step) {
+    if (step == count) {
+      pbqp_cost_t cost;
+      if (evaluate(problem, tuple, cost) && (!found || cost < best)) {
+        found = true;
+        best = cost;
+      }
+      return;
+    }
+    const size_t id = bounds.node(step);
+    for (size_t option : {size_t{0}, registers}) {
+      tuple[id] = option;
+      complete(step + 1);
+    }
+  };
+  complete(depth);
+  check(found && best == 300 && lower <= best);
+  // Prices learned with this fixed prefix are also a valid global capacity
+  // vector after returning to the root, where the independent optimum is 200.
+  check(bounds.lower_bound(nullptr, 0, workspace, lower) && lower <= 200);
+}
+
+void test_prefix_pricing_budget() {
+  context = "prefix candidate budget retains root capacity";
+  constexpr size_t half = 75, count = 2 * half, registers = 65;
+  constexpr size_t regular_neighbors = 13, extra_vertices = 50;
+  std::vector<pbqp_cost_t> unary(registers + 1);
+  unary[0] = 1;
+  std::vector<pbqp_node> nodes(count, pbqp_node{registers + 1, unary.data()});
+  std::vector<pbqp_cost_t> matrix((registers + 1) * (registers + 1));
+  for (size_t color = 1; color <= registers; ++color)
+    matrix[color * (registers + 1) + color] = PBQP_INF;
+  std::vector<pbqp_edge> edges;
+  // The complement is bipartite with exactly 1025 edges and no isolated
+  // vertices. Its edges are exactly the maximal independent pairs of PBQP.
+  for (size_t src = 0; src < count; ++src)
+    for (size_t tgt = src + 1; tgt < count; ++tgt) {
+      bool pair = false;
+      if (src < half && tgt >= half) {
+        const size_t offset = (tgt - half + half - src) % half;
+        pair = offset < regular_neighbors ||
+               (offset == regular_neighbors && src < extra_vertices);
+      }
+      if (!pair)
+        edges.push_back({src, tgt, matrix.data()});
+    }
+  pbqp_problem problem{nodes.size(), edges.size(), nodes.data(), edges.data()};
+  pbqp::OptimizedBranchAndBoundBounds bounds(problem);
+  bounds.prepare_search();
+  bounds.prepare_capacity();
+  check(bounds.patterns().complete() && bounds.patterns().size() == 1025);
+  check(bounds.weights().ready());
+  check(bounds.prefix_pricing_plan().status ==
+        pbqp::PrefixPricingStatus::CandidateBudget);
+  pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
+  check(!workspace.prefix.enabled());
+  pbqp_cost_t lower;
+  check(bounds.lower_bound(nullptr, 0, workspace, lower) && lower == 20);
+  // A register covers at most two vertices; 65 disjoint complement pairs
+  // achieve that limit, independently certifying the root value of 20.
+  std::vector<size_t> tuple(count);
+  for (size_t color = 0; color < registers; ++color)
+    tuple[color] = tuple[half + color] = color + 1;
+  pbqp_cost_t cost;
+  check(evaluate(problem, tuple, cost) && cost == 20);
+  DiagnosticLog log;
+  pbqp::describe_bnbopt_prefix_pricing(
+      bounds.prefix_pricing_plan(), pbqp::Diagnostics(record_diagnostic, &log));
+  check(log.text.find("candidate budget exceeded") != std::string::npos);
 }
 
 void test_bitset_boundaries() {
@@ -836,6 +1044,11 @@ extern "C++" void run_bnbopt_internal_tests() {
   test_bitsets<std::uint64_t>();
   test_prefix_bounds();
   test_prefix_bounds(true);
+  test_prefix_bounds(true, true);
+  test_prefix_pricing_budget();
+  test_prefix_high_register();
+  test_zero_price_scratch_budget();
+  test_cover_costs();
   test_bitset_boundaries();
   test_high_register_conflict();
   test_storage_budget_fallback();

@@ -41,6 +41,10 @@ bitsets and enumerates maximal sets directly; verified register structure and
 interpreting sets as register classes belong to `bnbopt`. A bounded all-subset reference lives only in private tests
 for differential checks and historical budget regressions. Pricing is also
 solver-specific and supplies integer constraints to the reference-order cost DP.
+`bnbopt_pricing.cppm` prepares shared root weights; `bnbopt_prefix_pricing.cppm`
+uses preallocated worker-local scratch for conditioned refinements. The complete
+catalogue also feeds the bounded primal seed in `bnbopt_cover.cppm`, invoked by
+orchestration rather than by bounds or workers.
 
 ## Shared B&B engine and baseline bounds
 

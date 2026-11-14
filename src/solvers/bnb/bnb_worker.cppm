@@ -104,6 +104,8 @@ template <typename Bounds> class BranchAndBoundWorker {
     const size_t id = bounds.node(depth);
     tuple[id] = bounds.option(id, state.scan);
     auto &child = state.children[depth][state.scan++];
+    if constexpr (requires { workspace.cutoff; })
+      workspace.cutoff = incumbent.cost_limit();
     child.live =
         bounds.lower_bound(tuple.data(), depth + 1, workspace, child.bound) &&
         incumbent.can_improve(child.bound);
@@ -149,6 +151,8 @@ template <typename Bounds> class BranchAndBoundWorker {
         // which survived the parent's lookahead without repeating its DP.
         bool possible;
         if (depth == base) {
+          if constexpr (requires { workspace.cutoff; })
+            workspace.cutoff = incumbent.cost_limit();
           possible = bounds.lower_bound(tuple.data(), depth, workspace, bound);
         } else {
           const auto &child = state.children[depth - 1][cursor[depth - 1]];
@@ -218,6 +222,12 @@ public:
       size_t id = bounds.node(base);
       tuple[id] = bounds.option(id, cursor[base]);
     }
+    if constexpr (requires {
+                    bounds.prepare_prefix(tuple.data(), base, workspace,
+                                          incumbent.cost_limit());
+                  })
+      bounds.prepare_prefix(tuple.data(), base, workspace,
+                            incumbent.cost_limit());
   }
   template <typename Observer>
   bool chunk(size_t quota, Observer &&observe) noexcept {
@@ -226,6 +236,8 @@ public:
     } else {
       for (size_t checks = 0; checks < quota; ++checks) {
         pbqp_cost_t bound;
+        if constexpr (requires { workspace.cutoff; })
+          workspace.cutoff = incumbent.cost_limit();
         bool possible =
             bounds.lower_bound(tuple.data(), depth, workspace, bound);
         if (possible && incumbent.can_improve(bound)) {

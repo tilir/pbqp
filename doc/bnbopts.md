@@ -28,6 +28,8 @@ a graph algorithm could theoretically be reused elsewhere:
 | Register-mask forward checking and clique spill-count DP (section 3) | Structural path only. A clique of arbitrary PBQP edges does not imply distinct registers. |
 | Global independent-set register capacity (section 4) | Structural path only. Interpreting graph sets as register classes requires the model. |
 | Dual pricing, integer-weight capacity, and its spill DP (section 5) | Structural path only, additionally requiring finite nonnegative spill costs and pricing budgets. |
+| Catalogue coverage incumbent (section 6) | Structural path only; requires finite nonnegative spills and a complete catalogue. |
+| Prefix-conditioned pricing (section 7) | Structural path only; also requires root weights, a finite incumbent, and per-worker budgets. |
 | Dynamic bitsets and maximal-independent-set enumeration in `core` | Reusable graph utilities; their use as PBQP capacity bounds is restricted to the structural path. |
 
 Rejecting the input shape leaves generic search and bounds available. Exceeding
@@ -456,10 +458,11 @@ The spill DP caps its state at `D`. A register transition adds weight zero and
 original cost zero; a spill transition adds `w_v` and the original `c_v`.
 It also processes fixed unary terms, in original node ID order. Feasibility is
 separate from the rounded float score, including reachable infinite sums.
-This necessary-condition DP supplies the pruning bound. Weights are prepared
-once and shared read-only; capacities and the DP are conditioned on each prefix.
-There is no continuous repricing in DFS. Clique and unweighted constraints remain
-available and are combined by maximum, not by adding overlapping costs.
+This necessary-condition DP supplies the pruning bound. Root weights are
+prepared once and shared read-only. Section 7 adds worker-local weights refined
+for the current prefix, using the same integer-capacity certificate. Clique,
+unweighted, root-weighted, and refined constraints are combined by maximum,
+not by adding overlapping costs.
 
 ### Catalogue sensitivity, budgets, and code map
 
@@ -480,7 +483,8 @@ The integer total is capped at 32,768 and the estimated weighted DP scan at
 4,194,304 state slots. Exhausted independent-set budgets discard the entire
 catalogue; pricing-specific limits disable only the weighted path. See
 `--verbose` for the actual catalogue, iteration count, quantization scale,
-state limit, and fallback reason.
+state limit, and fallback reason. Prefix diagnostics also report candidate
+storage, refresh work/iteration budgets, and the prepared state limit.
 
 The code map refers to [bnbopt_pricing.cppm](../src/solvers/bnbopt/bnbopt_pricing.cppm)
 and [bnbopt_bounds.cppm](../src/solvers/bnbopt/bnbopt_bounds.cppm).
@@ -501,6 +505,106 @@ capacity interpretation, budgets, quantization, and reference-order pruning
 pipeline above describe this implementation. They do not assert an LP solver's
 certificate or a convergence rate for the entire bounded, multi-temperature PBQP
 preparation stage.
+
+## 6. Seed from independent-set coverage
+
+**Scope: structural path only.** The complete maximal catalogue is also a
+primal representation of the register-allocation problem. Choose at most `R`
+sets, take their union as the retained vertices, and assign each vertex to its
+first selected set's register. Each register class is a subset of an independent
+set, so overlapping selected sets are harmless. Vertices outside the union spill.
+The catalogue is shared with both pricing paths; this creates no second catalogue.
+
+[RegisterCoverSeed](../src/solvers/bnbopt/bnbopt_cover.cppm) uses a deterministic
+bounded search over this representation. It starts with maximum uncovered spill
+cost gains, tries perturbed-cost greedy restarts, and exchanges one or two
+register classes. Two-class exchanges consider the 16 largest marginal-gain
+candidates. Three of every four attempts instead remove two to four classes
+from the best cover and greedily rebuild them before local improvement.
+
+Limits are 128 attempts, 32 one-class passes, four two-class passes, and
+8,388,608 pattern-member visits overall. Exceeding a budget retains the best
+completed candidate. Reaching the already proved root lower bound stops early.
+Double arithmetic ranks candidates only: each saved assignment is evaluated
+against the original input with the shared reference-order float evaluator.
+Reachable overflowed costs remain feasible. Negative or nonfinite spill costs
+disable this seed; ordinary greedy and reduction remain available.
+
+Orchestration checks the prepared capacity bound before constructing this seed,
+and checks again after an incumbent improvement. Root proofs therefore skip
+unnecessary heuristic work. This is an internal incumbent seed, not a new public
+solver or an optimality claim by the heuristic itself.
+
+## 7. Reprice the current prefix
+
+**Scope: structural path only.** This path requires complete independent sets,
+successful root pricing, a finite incumbent, and its own scratch/work budgets.
+A root price vector can be nearly optimal for the original graph yet very weak
+after several register classes have been fixed. Improving quantization alone
+cannot recover the information lost by keeping those prices fixed.
+
+Let `U` be the unassigned vertices and `H_r` the vertices already in register
+`r`. The compatible catalogue for that register is
+
+```text
+C_r = { I in C : H_r is a subset of I }.
+```
+
+An unused register has `H_r = empty` and uses the whole catalogue. Candidate
+scores include only vertices in `U`. With pending prices `0 <= p_v <= c_v`,
+the conditional real-arithmetic dual objective is
+
+```text
+F_A(p) = fixed real spill cost + sum(v in U) p_v
+         - sum(r) max(I in C_r) sum(v in I intersect U) p_v.
+```
+
+Replace each register's maximum with its own log-sum-exp, using the same
+smoothing and accelerated projected update as section 5. The pending gradient is
+
+```text
+g_v = 1 - sum(r) sum(I in C_r containing v) softmax_r(I).
+```
+
+Assigned prices remain zero. Registers not yet used share one catalogue and one
+softmax with multiplicity equal to their count. This avoids repeating identical
+work for every unused register. If `alpha_U` is the largest pending pattern size,
+the sum of covariance Hessians has norm at most `R * alpha_U / T`; the safe
+heuristic step remains `T / (R * alpha_U)`. Warm starts use the root weights
+converted back to price units and projected into the original cost box.
+
+[PrefixPriceOptimizer](../src/solvers/bnbopt/bnbopt_prefix_pricing.cppm) performs
+at most 64 iterations at each of the four root temperatures. After each stage,
+checked quantization writes a prepared integer buffer. The ordinary per-register
+integer capacities and original-order spill DP test those weights. **Neither
+`F_A`, its fixed-cost offset, nor a softmax value is a pruning bound.** Stop
+refining when this DP already closes the prefix against the incumbent.
+
+Refinement starts after the initial clique's positions have been assigned.
+Within that scope it is refreshed after four more assigned positions, when
+backtracking changes the prefix used to obtain the prices, or when the incumbent
+improves. The bounds workspace owns this state; shared graph/catalogue/root
+weights remain immutable. Each bound can use both root and local weights.
+Previously cached child bounds remain valid even after local prices change:
+every nonnegative integer weight vector defines a necessary capacity condition,
+independently of the prefix from which its prices were learned.
+
+Each worker preallocates at most 65,536 register-pattern candidate slots. A
+refresh's iterations share a 2,097,152-unit work budget, charging scoring and
+gradient visits plus per-candidate bookkeeping. Candidate construction is bounded
+separately by the slot cap. Exhausting this heuristic budget can retain a
+valid partially refined vector. Exceeding the candidate-storage budget disables
+refinement and retains root weights. Auxiliary totals obey the existing 32,768
+state limit and 4,194,304-slot DP budget; actual arrays use a checked bound from
+spill costs and the maximum quantization scale. No refresh allocates memory or
+invokes diagnostic callbacks inside DFS.
+
+Example [10_repricing_opts.pbqp](../examples/pbqp/10_repricing_opts.pbqp) has 70 vertices, 16 registers, and
+395 maximal independent sets. It illustrates both changes: a coverage seed is
+much better than the ordinary greedy seed, and a fixed prefix can require very
+different prices. The exact solver returns reference-order cost `369.419556`.
+This is a benchmark fixture, not a routine full-search CTest. Root and prefix
+pricing use the same catalogue and numerical proof throughout.
 
 ## Diagnostics and verification
 
@@ -528,6 +632,10 @@ per-register capacities on every small fixed-class/allowed-mask combination,
 and bounds against independent exhaustive completion of canonical prefixes. They
 cover signed and fractional costs, explicit INF, cancellation, reachable
 infinite accumulated costs, auxiliary-weight scaling, and fallback behavior.
+Conditioned-price tests replay learned vectors at unrelated prefixes and at the
+root, check register/node masks across word boundaries, and exercise candidate
+budget fallback. Coverage seeds are independently evaluated, including feasible
+infinite accumulated scores and unsupported signed/INF spill costs.
 Parallel tests cover actual sibling donation, serialized progress, weight
 conservation, and queue cancellation on dispatcher failure. Public tests retain independent
 assignment evaluation, input ownership, C compatibility, and heuristic quality.

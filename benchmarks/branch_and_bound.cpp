@@ -1,5 +1,5 @@
 /*
- * Google Benchmark exact-solver and heartbeat comparisons on examples 06-09.
+ * Google Benchmark exact-solver and heartbeat comparisons on examples 06-10.
  *
  * Run from the source checkout root. Input parsing and preflight verification
  * are outside timing; each iteration includes exact solve and solution cleanup.
@@ -154,6 +154,20 @@ int main(int argc, char **argv) {
       })
       ->ArgNames({"threads", "heartbeat"})
       ->Args({1, 0})
+      ->Args({4, 0})
+      ->Args({16, 0})
+      ->Args({16, 1})
+      ->Unit(benchmark::kMillisecond)
+      ->UseRealTime();
+  benchmark::RegisterBenchmark(
+      "BranchAndBoundOpt/Example10",
+      [](benchmark::State &s) {
+        example(s, "examples/pbqp/10_repricing_opts.pbqp", 369.419556F,
+                pbqp_solve_branch_and_bound_optimized);
+      })
+      ->ArgNames({"threads", "heartbeat"})
+      ->Args({1, 0})
+      ->Args({1, 1})
       ->Args({4, 0})
       ->Args({16, 0})
       ->Args({16, 1})

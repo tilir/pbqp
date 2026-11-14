@@ -17,6 +17,7 @@ import :bnb_bounds;
 import :bnbopt_structure;
 import :independent_sets;
 import :bnbopt_pricing;
+import :bnbopt_prefix_pricing;
 namespace pbqp {
 void describe_bnbopt_input(const pbqp_problem &p,
                            const InterferenceCheck &check,
@@ -95,6 +96,33 @@ void describe_bnbopt_structure(const RegallocStructure &graph,
            graph.uses_adaptive_tail()
                ? "adaptive prefix connectivity"
                : "static degree order (comparison budget)");
+}
+
+void describe_bnbopt_prefix_pricing(const PrefixPricingPlan &plan,
+                                    Diagnostics log) {
+  if (!log)
+    return;
+  switch (plan.status) {
+  case PrefixPricingStatus::Enabled:
+    log.line("bnbopt: prefix pricing enabled: iterations per temperature=",
+             PrefixPriceOptimizer::iterations,
+             "; iteration work units per refresh=",
+             PrefixPriceOptimizer::work_budget,
+             "; candidate slots=", plan.candidates, "/",
+             PrefixPriceOptimizer::candidate_budget,
+             "; auxiliary state limit=", plan.state_limit,
+             "; depth refresh interval=", PrefixPriceOptimizer::refresh_depth,
+             "; finite incumbent required");
+    break;
+  case PrefixPricingStatus::CandidateBudget:
+    log.line("bnbopt: prefix pricing disabled: register-pattern candidate "
+             "budget exceeded; root weights retained");
+    break;
+  case PrefixPricingStatus::RootUnavailable:
+    log.line(
+        "bnbopt: prefix pricing disabled: root auxiliary weights unavailable");
+    break;
+  }
 }
 
 void describe_bnbopt_capacity(const pbqp_problem &problem,

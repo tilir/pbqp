@@ -156,42 +156,59 @@ struct QuantizedPrices {
 };
 constexpr size_t capacity_state_budget = 32768;
 
-QuantizedPrices quantize_prices(const std::vector<double> &prices,
-                                size_t limit) {
+struct PriceQuantization {
+  PricingStatus status = PricingStatus::NotPrepared;
+  size_t total = 0;
+  double scale = 0;
+};
+
+PriceQuantization quantize_prices_into(const std::vector<double> &prices,
+                                       size_t limit,
+                                       std::vector<size_t> &weights) noexcept {
   double sum = 0;
   for (double price : prices) {
     if (!std::isfinite(price) || price < 0)
-      return {PricingStatus::NonFinite, {}, 0, 0};
+      return {PricingStatus::NonFinite, 0, 0};
     sum += price;
   }
   if (!std::isfinite(sum))
-    return {PricingStatus::NonFinite, {}, 0, 0};
+    return {PricingStatus::NonFinite, 0, 0};
   if (!(sum > 0))
-    return {PricingStatus::ZeroWeights, {}, 0, 0};
+    return {PricingStatus::ZeroWeights, 0, 0};
   // Nearest-integer quantization halves the worst per-vertex error versus
   // truncation and removes its systematic downward bias. Reserve half a unit
   // per node so rounded weights fit the state/work budget. The cap also keeps
   // every checked integer conversion exactly representable in double.
   if (!limit || limit > capacity_state_budget)
-    return {PricingStatus::StateBudget, {}, 0, 0};
+    return {PricingStatus::StateBudget, 0, 0};
   double available = static_cast<double>(limit) - 0.5 * prices.size();
   if (!(available > 0))
-    return {PricingStatus::StateBudget, {}, 0, 0};
-  QuantizedPrices result;
+    return {PricingStatus::StateBudget, 0, 0};
+  PriceQuantization result;
   result.scale = std::min(4.0, available / sum);
-  result.weights.resize(prices.size());
+  if (weights.size() != prices.size())
+    return {PricingStatus::StateBudget, 0, 0};
   for (size_t id = 0; id < prices.size(); ++id) {
     double value = std::round(prices[id] * result.scale);
     if (!std::isfinite(value) || value < 0)
-      return {PricingStatus::NonFinite, {}, 0, result.scale};
+      return {PricingStatus::NonFinite, 0, result.scale};
     if (value > limit || static_cast<size_t>(value) > limit - result.total)
-      return {PricingStatus::StateBudget, {}, 0, result.scale};
-    result.weights[id] = static_cast<size_t>(value);
-    result.total += result.weights[id];
+      return {PricingStatus::StateBudget, 0, result.scale};
+    weights[id] = static_cast<size_t>(value);
+    result.total += weights[id];
   }
   result.status =
       result.total ? PricingStatus::Enabled : PricingStatus::ZeroWeights;
   return result;
+}
+
+QuantizedPrices quantize_prices(const std::vector<double> &prices,
+                                size_t limit) {
+  std::vector<size_t> weights(prices.size());
+  const auto result = quantize_prices_into(prices, limit, weights);
+  if (result.status != PricingStatus::Enabled)
+    return {result.status, {}, 0, result.scale};
+  return {result.status, std::move(weights), result.total, result.scale};
 }
 
 class RegallocPricing {

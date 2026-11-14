@@ -110,6 +110,9 @@ and assignment check are untimed. Optimized cases `BranchAndBoundOpt/Example06`,
 compare baseline/optimized behavior on the original, unpermuted fixtures.
 Example 09 adds 1/4/16-thread and heartbeat cases with known optimum
 338.854034; do not run baseline exact solvers on it in routine tests.
+Example 10 adds 1/4/16-thread cases, with heartbeat variants on 1 and 16 threads,
+and known reference-order optimum 369.419556. It covers catalogue seeding and
+prefix-conditioned pricing; do not run baseline exact solvers on it in CTest.
 Example 08's known optimum is 161.241684; it is a benchmark, not a full baseline
 exact-search CTest. The benchmark heartbeat uses a no-op callback
 to measure progress accounting without terminal I/O. Run:
@@ -223,3 +226,10 @@ Completion is reserved until the search joins, including empty incoming jobs.
 Retain naive's independent exact mixed-radix threshold tests. Example 10 is a
 manual long-running heartbeat check; do not exhaust it in ordinary CTest or
 assert timing thresholds for its dots.
+
+Prefix-pricing regressions check every canonical prefix against independent
+original-order completions, reuse weights after backtracking and at the root,
+and exercise the 66th register on a 70-node graph. A complete 1025-pair catalogue
+exceeds the register-pattern candidate budget while retaining an independently
+certified root capacity. Seed tests cover fractional, signed, explicit-INF,
+and reachable overflowed costs without changing input arrays.
