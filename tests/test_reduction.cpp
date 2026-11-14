@@ -98,7 +98,7 @@ struct Snapshot {
 
 SolutionPtr solve_reduction(const pbqp_problem &p) {
   pbqp_solution *raw = nullptr;
-  check(pbqp_solve_reduction(&p, &raw, nullptr) == PBQP_OK);
+  check(pbqp_solve_reduction(&p, nullptr, &raw, nullptr) == PBQP_OK);
   SolutionPtr solution(raw);
   check(solution->quality == PBQP_SOLUTION_FEASIBLE &&
         solution->num_nodes == p.num_nodes);
@@ -153,8 +153,10 @@ void test_low_degree() {
       auto p = fixture->view();
       Snapshot snapshot(p);
       pbqp_solution *exact_raw = nullptr, *reduced_raw = nullptr;
-      auto exact_status = pbqp_solve_bruteforce(&p, &exact_raw, nullptr);
-      auto reduced_status = pbqp_solve_reduction(&p, &reduced_raw, nullptr);
+      auto exact_status =
+          pbqp_solve_bruteforce(&p, nullptr, &exact_raw, nullptr);
+      auto reduced_status =
+          pbqp_solve_reduction(&p, nullptr, &reduced_raw, nullptr);
       SolutionPtr exact(exact_raw), reduced(reduced_raw);
       snapshot.check_unchanged(p);
       if (exact_status == PBQP_INFEASIBLE) {

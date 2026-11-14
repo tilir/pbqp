@@ -6,10 +6,12 @@ set(PBQP_TEST_SOURCES test_pbqp.cpp)
 set(PBQP_PARALLEL_TEST_SOURCES test_parallel_exact.cpp)
 set(PBQP_REDUCTION_TEST_SOURCES test_reduction.cpp)
 set(PBQP_C_API_TEST_SOURCES test_c_api.c)
+set(PBQP_CPP_API_TEST_SOURCES test_cpp_api.cpp)
 set(PBQP_INTERNAL_TEST_SOURCES test_search_internals.cpp)
 set(PBQP_INTERNAL_TEST_SUPPORT search_test_support.cpp bnbopt_test_support.cpp)
 pbqp_register_format_sources(${PBQP_TEST_SOURCES} ${PBQP_REDUCTION_TEST_SOURCES}
-  ${PBQP_C_API_TEST_SOURCES} ${PBQP_PARALLEL_TEST_SOURCES}
+  ${PBQP_C_API_TEST_SOURCES} ${PBQP_CPP_API_TEST_SOURCES}
+  ${PBQP_PARALLEL_TEST_SOURCES}
   ${PBQP_INTERNAL_TEST_SOURCES} ${PBQP_INTERNAL_TEST_SUPPORT})
 set(PBQP_FORMAT_SOURCES "${PBQP_FORMAT_SOURCES}" PARENT_SCOPE)
 
@@ -49,10 +51,17 @@ set_target_properties(test_c_api PROPERTIES C_EXTENSIONS OFF)
 pbqp_set_output_directories(test_c_api)
 add_test(NAME c_api COMMAND test_c_api)
 
+add_executable(test_cpp_api ${PBQP_CPP_API_TEST_SOURCES})
+target_link_libraries(test_cpp_api PRIVATE pbqp)
+pbqp_configure_cxx_target(test_cpp_api PRIVATE)
+add_test(NAME cpp_api COMMAND test_cpp_api
+  "${PROJECT_SOURCE_DIR}/examples/pbqp/01_basic.pbqp"
+  "${PROJECT_BINARY_DIR}/cpp-api-test.pbqp")
+
 add_test(NAME cli COMMAND "${CMAKE_COMMAND}"
   "-DPBQP=$<TARGET_FILE:pbqp_cli>"
   "-DGENERATOR=$<TARGET_FILE:pbqp_generate>"
-  "-DEXAMPLE=${PROJECT_SOURCE_DIR}/examples/01_basic.pbqp"
-  "-DHEURISTIC_EXAMPLE=${PROJECT_SOURCE_DIR}/examples/07_parallel_exact_beats_heuristics.pbqp"
+  "-DEXAMPLE=${PROJECT_SOURCE_DIR}/examples/pbqp/01_basic.pbqp"
+  "-DHEURISTIC_EXAMPLE=${PROJECT_SOURCE_DIR}/examples/pbqp/07_parallel_exact_beats_heuristics.pbqp"
   "-DWORK=${PROJECT_BINARY_DIR}/cli-test"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/cli.cmake")

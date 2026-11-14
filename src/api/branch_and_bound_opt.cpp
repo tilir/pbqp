@@ -20,32 +20,10 @@ import :bnbopt_bounds;
 import :diagnostics;
 
 extern "C" {
-pbqp_status pbqp_solve_branch_and_bound_optimized(const pbqp_problem *p,
-                                                  pbqp_solution **out,
-                                                  pbqp_error *error) {
-  return pbqp_solve_branch_and_bound_optimized_with_progress(
-      p, nullptr, nullptr, out, error);
-}
-
-pbqp_status pbqp_solve_branch_and_bound_optimized_with_progress(
-    const pbqp_problem *p, pbqp_progress_callback progress, void *user_data,
-    pbqp_solution **out, pbqp_error *error) {
-  const pbqp_solve_options options{1, progress, user_data};
-  return pbqp_solve_branch_and_bound_optimized_with_options(p, &options, out,
-                                                            error);
-}
-
-pbqp_status pbqp_solve_branch_and_bound_optimized_with_options(
-    const pbqp_problem *p, const pbqp_solve_options *options,
-    pbqp_solution **out, pbqp_error *error) {
-  return pbqp_solve_branch_and_bound_optimized_with_diagnostics(
-      p, options, nullptr, nullptr, out, error);
-}
-
-pbqp_status pbqp_solve_branch_and_bound_optimized_with_diagnostics(
-    const pbqp_problem *p, const pbqp_solve_options *options,
-    pbqp_diagnostic_callback diagnostics, void *diagnostic_data,
-    pbqp_solution **out, pbqp_error *error) {
+pbqp_status
+pbqp_solve_branch_and_bound_optimized(const pbqp_problem *p,
+                                      const pbqp_solve_options *options,
+                                      pbqp_solution **out, pbqp_error *error) {
   if (out)
     *out = nullptr;
   return pbqp::api_call(error, [&]() -> pbqp_status {
@@ -53,7 +31,8 @@ pbqp_status pbqp_solve_branch_and_bound_optimized_with_diagnostics(
       return pbqp::set_error(error, PBQP_INVALID, 0, "missing output pointer");
     size_t threads = pbqp::thread_count(options);
     pbqp::validate(p);
-    const pbqp::Diagnostics log(diagnostics, diagnostic_data);
+    const pbqp::Diagnostics log(options ? options->diagnostics : nullptr,
+                                options ? options->diagnostic_data : nullptr);
     log.line("bnbopt: preparing reference minima and checking input shape");
     pbqp::BranchAndBoundSearch<pbqp::OptimizedBranchAndBoundBounds> search(
         *p, threads, options ? options->progress : nullptr,

@@ -57,15 +57,15 @@ void report(unsigned percent, void *data) noexcept {
 void verify(const pbqp_problem &problem, size_t threads, bool naive = false,
             bool optimized = false) {
   pbqp_solution *raw = nullptr;
-  auto expected = pbqp_solve_bruteforce(&problem, &raw, nullptr);
+  auto expected = pbqp_solve_bruteforce(&problem, nullptr, &raw, nullptr);
   SolutionPtr exact(raw);
   Progress progress;
-  const pbqp_solve_options options{threads, report, &progress};
+  const pbqp_solve_options options{threads, report, &progress, nullptr,
+                                   nullptr};
   pbqp_error error{42, "old error"};
-  auto solve =
-      naive ? pbqp_solve_bruteforce_with_options
-            : (optimized ? pbqp_solve_branch_and_bound_optimized_with_options
-                         : pbqp_solve_branch_and_bound_with_options);
+  auto solve = naive ? pbqp_solve_bruteforce
+                     : (optimized ? pbqp_solve_branch_and_bound_optimized
+                                  : pbqp_solve_branch_and_bound);
   auto status = solve(&problem, &options, &raw, &error);
   SolutionPtr solution(raw);
   check(status == expected && !progress.invalid && progress.count == 100);
@@ -150,9 +150,10 @@ void test_small() {
                                 {4, 5, any}};
   pbqp_problem unseeded{6, 7, unseeded_nodes, unseeded_edges};
   pbqp_solution *missing = nullptr;
-  check(pbqp_solve_greedy(&unseeded, &missing, nullptr) == PBQP_NO_SOLUTION &&
+  check(pbqp_solve_greedy(&unseeded, nullptr, &missing, nullptr) ==
+            PBQP_NO_SOLUTION &&
         !missing);
-  check(pbqp_solve_reduction(&unseeded, &missing, nullptr) ==
+  check(pbqp_solve_reduction(&unseeded, nullptr, &missing, nullptr) ==
             PBQP_NO_SOLUTION &&
         !missing);
   verify(unseeded, 4);
@@ -184,10 +185,10 @@ void test_large_progress() {
     std::vector<pbqp_node> nodes(65, pbqp_node{2, costs});
     pbqp_problem problem{nodes.size(), 0, nodes.data(), nullptr};
     Progress progress;
-    const pbqp_solve_options options{4, report, &progress};
+    const pbqp_solve_options options{4, report, &progress, nullptr, nullptr};
     pbqp_solution *raw = nullptr;
-    auto status = pbqp_solve_branch_and_bound_with_options(&problem, &options,
-                                                           &raw, nullptr);
+    auto status =
+        pbqp_solve_branch_and_bound(&problem, &options, &raw, nullptr);
     SolutionPtr solution(raw);
     check(status == (forbidden ? PBQP_INFEASIBLE : PBQP_OK));
     check(progress.count == 100 && !progress.invalid);
@@ -204,10 +205,10 @@ void test_large_progress() {
   pbqp_edge edges[] = {{62, 63, equal}, {62, 64, unequal}, {63, 64, equal}};
   pbqp_problem problem{nodes.size(), 3, nodes.data(), edges};
   Progress progress;
-  const pbqp_solve_options options{4, report, &progress};
+  const pbqp_solve_options options{4, report, &progress, nullptr, nullptr};
   pbqp_solution *raw = nullptr;
-  check(pbqp_solve_branch_and_bound_with_options(&problem, &options, &raw,
-                                                 nullptr) == PBQP_OK);
+  check(pbqp_solve_branch_and_bound(&problem, &options, &raw, nullptr) ==
+        PBQP_OK);
   SolutionPtr solution(raw);
   check(solution->cost == 1 && solution->quality == PBQP_SOLUTION_OPTIMAL);
   check(progress.count == 100 && !progress.invalid);
@@ -307,12 +308,12 @@ void test_optimized_regalloc() {
   pbqp_problem odd_cycles{cycles.size(), cycle_edges.size(), cycles.data(),
                           cycle_edges.data()};
   Progress progress;
-  pbqp_solve_options configuration{4, report, &progress};
-  pbqp_solution *raw = nullptr;
   std::string diagnostics;
-  check(pbqp_solve_branch_and_bound_optimized_with_diagnostics(
-            &odd_cycles, &configuration, record_diagnostic, &diagnostics, &raw,
-            nullptr) == PBQP_OK);
+  pbqp_solve_options configuration{4, report, &progress, record_diagnostic,
+                                   &diagnostics};
+  pbqp_solution *raw = nullptr;
+  check(pbqp_solve_branch_and_bound_optimized(&odd_cycles, &configuration, &raw,
+                                              nullptr) == PBQP_OK);
   check(diagnostics.find("set count budget reached") != std::string::npos);
   check(diagnostics.find("partial results discarded") != std::string::npos);
   check(diagnostics.find("structural path enabled") != std::string::npos);
@@ -329,17 +330,18 @@ void test_optimized_regalloc() {
 void test_contract() {
   pbqp_problem empty{};
   pbqp_solution *raw = nullptr;
-  const pbqp_solve_options options{4, nullptr, nullptr};
-  for (auto solve : {pbqp_solve_branch_and_bound_with_options,
-                     pbqp_solve_branch_and_bound_optimized_with_options,
-                     pbqp_solve_bruteforce_with_options}) {
+  const pbqp_solve_options options{4, nullptr, nullptr, nullptr, nullptr};
+  for (auto solve :
+       {pbqp_solve_branch_and_bound, pbqp_solve_branch_and_bound_optimized,
+        pbqp_solve_bruteforce}) {
     check(solve(&empty, nullptr, &raw, nullptr) == PBQP_OK);
     SolutionPtr solution(raw);
     for (size_t threads :
          {size_t{0},
           static_cast<size_t>(std::numeric_limits<int>::max()) + 1}) {
       Progress progress;
-      const pbqp_solve_options invalid{threads, report, &progress};
+      const pbqp_solve_options invalid{threads, report, &progress, nullptr,
+                                       nullptr};
       raw = solution.get();
       pbqp_error error;
       check(solve(&empty, &invalid, &raw, &error) == PBQP_INVALID);
@@ -356,8 +358,8 @@ void test_contract() {
     settings.num_registers = 2;
     auto owner = pbqp_tools::generate_problem(settings);
     auto view = owner.view();
-    check(pbqp_solve_branch_and_bound_with_options(&view, &options, &owned,
-                                                   nullptr) == PBQP_OK);
+    check(pbqp_solve_branch_and_bound(&view, &options, &owned, nullptr) ==
+          PBQP_OK);
   }
   SolutionPtr independent(owned);
   check(independent->num_nodes == 6 &&

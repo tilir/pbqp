@@ -141,7 +141,8 @@ instead disables capacity bounds. These decisions must remain distinct. Verbose
 output includes the actual number of retained cliques, examined sets, pricing
 iterations, effective integer-weight
 limit and scaling, planned jobs, prepared workers, and any planning cutoff.
-The library callback is `pbqp_solve_branch_and_bound_optimized_with_diagnostics`;
+Library callers set `diagnostics` and `diagnostic_data` in `pbqp_solve_options`
+passed to `pbqp_solve_branch_and_bound_optimized`;
 CLI formatting stays in the tool and diagnostic text never replaces stdout
 solution records.
 
@@ -167,7 +168,7 @@ cmake --build build --target pbqp_benchmark_bnb
   --benchmark_repetitions=3
 ```
 
-[09_more_bnbopts.pbqp](../examples/09_more_bnbopts.pbqp) has 60 nodes, 1,500
+[09_more_bnbopts.pbqp](../examples/pbqp/09_more_bnbopts.pbqp) has 60 nodes, 1,500
 edges, and 16 registers. Its graph has 441 nonempty independent sets and none
 larger than three, so at least 12 nodes must spill. Its weighted optimum instead
 spills 13 nodes and has reference cost `338.854034`.

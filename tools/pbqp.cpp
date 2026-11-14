@@ -52,12 +52,27 @@ void heartbeat(unsigned percent, void *) noexcept {
 }
 struct SolverOptions {
   std::string_view solver{};
+  pbqp_solver algorithm = PBQP_SOLVER_NAIVE;
   std::string_view input{};
   bool report_progress = false;
   bool help_requested = false;
   size_t num_threads = 1;
   bool verbose = false;
 };
+
+std::optional<pbqp_solver> solver_kind(std::string_view name) {
+  if (name == "naive")
+    return PBQP_SOLVER_NAIVE;
+  if (name == "bnb")
+    return PBQP_SOLVER_BNB;
+  if (name == "bnbopt")
+    return PBQP_SOLVER_BNBOPT;
+  if (name == "greedy")
+    return PBQP_SOLVER_GREEDY;
+  if (name == "r1r2rn")
+    return PBQP_SOLVER_R1R2RN;
+  return std::nullopt;
+}
 
 std::optional<SolverOptions> parse_options(int argc, char **argv) {
   try {
@@ -67,8 +82,8 @@ std::optional<SolverOptions> parse_options(int argc, char **argv) {
     if (arguments.help())
       return SolverOptions{.help_requested = true};
     auto solver = arguments.require("--solve");
-    if (solver != "naive" && solver != "greedy" && solver != "bnb" &&
-        solver != "bnbopt" && solver != "r1r2rn")
+    auto algorithm = solver_kind(solver);
+    if (!algorithm)
       throw std::invalid_argument("unknown solver: " + std::string(solver));
     bool report_progress = arguments.has("--heartbeat");
     if (report_progress && solver != "naive" && solver != "bnb" &&
@@ -93,6 +108,7 @@ std::optional<SolverOptions> parse_options(int argc, char **argv) {
             "--numthreads requires a positive integer that fits in int");
     }
     return SolverOptions{.solver = solver,
+                         .algorithm = *algorithm,
                          .input = arguments.positional().front(),
                          .report_progress = report_progress,
                          .num_threads = num_threads,
@@ -135,30 +151,10 @@ pbqp_status solve_problem(const SolverOptions &options,
                           const pbqp_problem &problem, SolutionPtr &solution,
                           pbqp_error &error) {
   pbqp_solution *raw = nullptr;
-  pbqp_status status;
-  if (options.solver == "greedy") {
-    status = pbqp_solve_greedy(&problem, &raw, &error);
-  } else if (options.solver == "r1r2rn") {
-    status = pbqp_solve_reduction(&problem, &raw, &error);
-  } else if (options.solver == "bnb" || options.solver == "bnbopt") {
-    const pbqp_solve_options config{
-        options.num_threads, options.report_progress ? heartbeat : nullptr,
-        nullptr};
-    auto solve = options.solver == "bnbopt"
-                     ? pbqp_solve_branch_and_bound_optimized_with_options
-                     : pbqp_solve_branch_and_bound_with_options;
-    if (options.solver == "bnbopt" && options.verbose)
-      status = pbqp_solve_branch_and_bound_optimized_with_diagnostics(
-          &problem, &config, diagnostic, nullptr, &raw, &error);
-    else
-      status = solve(&problem, &config, &raw, &error);
-  } else {
-    const pbqp_solve_options config{
-        options.num_threads, options.report_progress ? heartbeat : nullptr,
-        nullptr};
-    status =
-        pbqp_solve_bruteforce_with_options(&problem, &config, &raw, &error);
-  }
+  const pbqp_solve_options config{
+      options.num_threads, options.report_progress ? heartbeat : nullptr,
+      nullptr, options.verbose ? diagnostic : nullptr, nullptr};
+  auto status = pbqp_solve(options.algorithm, &problem, &config, &raw, &error);
   solution.reset(raw);
   return status;
 }

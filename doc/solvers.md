@@ -5,6 +5,40 @@ All solvers report costs in the reference evaluation order: unary terms in
 node ID order, then pairwise terms in stored edge order, using ordinary float
 addition. Input validation and solution ownership rules are in `include/pbqp.h`.
 
+## C API selection
+
+Each solver has one dedicated entry point with the signature
+`(problem, options, out, error)`. Pass NULL options for one thread without
+callbacks. `pbqp_solve_options` contains the thread limit, progress callback and
+its `user_data`, and diagnostic callback with its independent `diagnostic_data`.
+Progress callbacks are supported by exact solvers; heuristics reject them with
+`PBQP_INVALID` and always use one thread. A thread limit above one is valid for
+a heuristic but does not make it parallel.
+
+`pbqp_solve(solver, problem, options, out, error)` dispatches by `pbqp_solver`:
+
+| Enum | Dedicated entry | Result quality on success |
+| --- | --- | --- |
+| `PBQP_SOLVER_NAIVE` | `pbqp_solve_bruteforce` | OPTIMAL |
+| `PBQP_SOLVER_BNB` | `pbqp_solve_branch_and_bound` | OPTIMAL |
+| `PBQP_SOLVER_BNBOPT` | `pbqp_solve_branch_and_bound_optimized` | OPTIMAL |
+| `PBQP_SOLVER_GREEDY` | `pbqp_solve_greedy` | FEASIBLE |
+| `PBQP_SOLVER_R1R2RN` | `pbqp_solve_reduction` | FEASIBLE |
+
+Unknown enum values return `PBQP_INVALID` without callbacks. Both forms validate
+input and options, clear the output pointer on failure, and transfer ownership
+of an independent solution on success. For example:
+
+```c
+pbqp_solve_options options = {4, NULL, NULL, NULL, NULL};
+pbqp_solution *solution = NULL;
+pbqp_error error;
+pbqp_status status = pbqp_solve(PBQP_SOLVER_BNBOPT, problem, &options,
+                               &solution, &error);
+/* Inspect status before using solution. NULL is safe to free. */
+pbqp_solution_free(solution);
+```
+
 ## Naive exhaustive search
 
 `--solve=naive` enumerates every tuple in lexicographic order. It retains the
@@ -18,16 +52,17 @@ by cost and lexicographic assignment, preserving naive's first-optimum contract
 independently of scheduling. Each tuple still uses the original sequential
 float summation order; worker results are never combined by adding costs.
 
-The C entry point `pbqp_solve_bruteforce_with_options` accepts shared
-`pbqp_solve_options` (thread limit, callback, user data). Legacy naive entry
-points retain the direct single-thread implementation. Parallel progress counts
+The sole C entry point `pbqp_solve_bruteforce` accepts shared
+`pbqp_solve_options` (thread limit, progress and diagnostic callbacks with
+independent contexts). NULL options select the direct single-thread path
+without callbacks. Parallel progress counts
 all visited tuples using the same exact covered-space accumulator as B&B.
 
 ## Branch-and-bound
 
 ```sh
 pbqp --solve=bnb --numthreads=4 --heartbeat \
-  examples/06_exact_beats_heuristics.pbqp
+  examples/pbqp/06_exact_beats_heuristics.pbqp
 ```
 
 `bnb` is exact under the reference float semantics. It returns any optimum;
@@ -126,14 +161,14 @@ compares 1/4/16 threads with heartbeat enabled and disabled.
 
 | Example | Greedy | R1/R2/RN | Exact optimum |
 | --- | ---: | ---: | ---: |
-| [06_exact_beats_heuristics.pbqp](../examples/06_exact_beats_heuristics.pbqp) | 22.1286182 | 22.1286182 | 0 |
-| [07_parallel_exact_beats_heuristics.pbqp](../examples/07_parallel_exact_beats_heuristics.pbqp) | 91.4585114 | 54.0987892 | 10.1112299 |
+| [06_exact_beats_heuristics.pbqp](../examples/pbqp/06_exact_beats_heuristics.pbqp) | 22.1286182 | 22.1286182 | 0 |
+| [07_parallel_exact_beats_heuristics.pbqp](../examples/pbqp/07_parallel_exact_beats_heuristics.pbqp) | 91.4585114 | 54.0987892 | 10.1112299 |
 
 ## Optimized branch-and-bound
 
 ```sh
 pbqp --solve=bnbopt --numthreads=4 --heartbeat \
-  examples/08_too_long_for_simple_bnb.pbqp
+  examples/pbqp/08_too_long_for_simple_bnb.pbqp
 ```
 
 `bnbopt` is a separate exact solver with the same C contracts, any-optimum tie
@@ -231,8 +266,8 @@ conversion or allocation. Negative/INF spill costs retain valid unweighted and
 clique bounds. Cheap root/seed and structural proofs precede the extra work.
 No external LP library is required.
 
-The C entry points are `pbqp_solve_branch_and_bound_optimized`, its
-`_with_progress` variant, and `_with_options` accepting `pbqp_solve_options`.
+The sole dedicated C entry point is `pbqp_solve_branch_and_bound_optimized`,
+accepting `pbqp_solve_options`, or NULL for defaults.
 Optional `BranchAndBoundOpt/Example06`, `/Example07`, `/Example08`, and `/Example09` Google
 Benchmark cases compare thread counts and heartbeat overhead. The [optimization guide](bnbopts.md) lists the additional assumptions, bounds,
 preparation budgets, and fallbacks, with reproducible benchmark commands.
@@ -252,11 +287,11 @@ An early root proof explicitly explains why later preparation was unnecessary.
 A limit on one component does not disable unrelated valid optimizations.
 
 Library callers can request the same `bnbopt` messages through
-`pbqp_solve_branch_and_bound_optimized_with_diagnostics`. Its synchronous C
-callback receives a borrowed NUL-terminated message without a newline, outside
-DFS. Diagnostic and progress contexts are independent. Existing options layout
-and entry points are preserved; messages are not a stable machine-readable
-format. No callback or terminal output is added when diagnostics are disabled.
+`pbqp_solve_branch_and_bound_optimized`, using the `diagnostics` and
+`diagnostic_data` fields of `pbqp_solve_options`. The synchronous C callback
+receives a borrowed NUL-terminated message without a newline, outside DFS. Diagnostic and progress contexts are independent; messages are not a
+stable machine-readable format. No diagnostic callback or terminal output is
+added when diagnostics are disabled.
 
 ## Greedy heuristic
 
@@ -268,8 +303,8 @@ result is FEASIBLE; a dead end is NO_SOLUTION, not proof of INFEASIBLE.
 ## R1/R2/RN reduction heuristic
 
 ```sh
-pbqp --solve=greedy examples/07_parallel_exact_beats_heuristics.pbqp
-pbqp --solve=r1r2rn examples/07_parallel_exact_beats_heuristics.pbqp
+pbqp --solve=greedy examples/pbqp/07_parallel_exact_beats_heuristics.pbqp
+pbqp --solve=r1r2rn examples/pbqp/07_parallel_exact_beats_heuristics.pbqp
 ```
 
 `--solve=r1r2rn` implements the reduction/backpropagation scheme used by LLVM

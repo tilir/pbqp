@@ -3,3 +3,5 @@
 /pbqp
 /tests/test_pbqp
 /build*/
+__pycache__/
+*.py[cod]

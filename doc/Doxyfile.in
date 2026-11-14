@@ -1,0 +1,30 @@
+# Public API reference; implementation modules are intentionally excluded.
+# SPDX-License-Identifier: GPL-3.0-only
+# See LICENSE for the full license text.
+
+PROJECT_NAME           = "PBQP API"
+PROJECT_NUMBER         = "@PROJECT_VERSION@"
+PROJECT_BRIEF          = "C API 1.0 and C++23 conveniences"
+OUTPUT_DIRECTORY       = "@PROJECT_BINARY_DIR@/docs"
+INPUT                  = "@PROJECT_SOURCE_DIR@/include/pbqp.h" \
+                         "@PROJECT_SOURCE_DIR@/include/pbqp.hpp"
+FULL_PATH_NAMES        = NO
+JAVADOC_AUTOBRIEF      = YES
+ALWAYS_DETAILED_SEC     = YES
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = NO
+HIDE_UNDOC_MEMBERS     = YES
+ENABLE_PREPROCESSING   = YES
+PREDEFINED             = __cplusplus=202302L
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_LATEX         = NO
+HAVE_DOT               = NO
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_AS_ERROR          = YES

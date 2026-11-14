@@ -14,27 +14,15 @@ module;
 module pbqp;
 import :api_boundary;
 import :error;
+import :diagnostics;
 import :problem;
 import :branch_and_bound;
 
 extern "C" {
 pbqp_status pbqp_solve_branch_and_bound(const pbqp_problem *p,
+                                        const pbqp_solve_options *options,
                                         pbqp_solution **out,
                                         pbqp_error *error) {
-  return pbqp_solve_branch_and_bound_with_progress(p, nullptr, nullptr, out,
-                                                   error);
-}
-
-pbqp_status pbqp_solve_branch_and_bound_with_progress(
-    const pbqp_problem *p, pbqp_progress_callback progress, void *user_data,
-    pbqp_solution **out, pbqp_error *error) {
-  const pbqp_solve_options options{1, progress, user_data};
-  return pbqp_solve_branch_and_bound_with_options(p, &options, out, error);
-}
-
-pbqp_status pbqp_solve_branch_and_bound_with_options(
-    const pbqp_problem *p, const pbqp_solve_options *options,
-    pbqp_solution **out, pbqp_error *error) {
   if (out)
     *out = nullptr;
   return pbqp::api_call(error, [&]() -> pbqp_status {
@@ -42,9 +30,11 @@ pbqp_status pbqp_solve_branch_and_bound_with_options(
       return pbqp::set_error(error, PBQP_INVALID, 0, "missing output pointer");
     size_t threads = pbqp::thread_count(options);
     pbqp::validate(p);
-    pbqp::BranchAndBoundSearch search(*p, threads,
-                                      options ? options->progress : nullptr,
-                                      options ? options->user_data : nullptr);
+    const pbqp::Diagnostics log(options ? options->diagnostics : nullptr,
+                                options ? options->diagnostic_data : nullptr);
+    pbqp::BranchAndBoundSearch search(
+        *p, threads, options ? options->progress : nullptr,
+        options ? options->user_data : nullptr, log);
     search.prepare();
     auto status = search.run(error);
     if (status != PBQP_OK)

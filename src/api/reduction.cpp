@@ -14,10 +14,12 @@ module;
 module pbqp;
 import :api_boundary;
 import :error;
+import :diagnostics;
 import :problem;
 import :reduction;
 
 extern "C" pbqp_status pbqp_solve_reduction(const pbqp_problem *problem,
+                                            const pbqp_solve_options *options,
                                             pbqp_solution **out,
                                             pbqp_error *error) {
   if (out)
@@ -25,7 +27,14 @@ extern "C" pbqp_status pbqp_solve_reduction(const pbqp_problem *problem,
   return pbqp::api_call(error, [&]() -> pbqp_status {
     if (!out)
       return pbqp::set_error(error, PBQP_INVALID, 0, "missing output pointer");
+    pbqp::thread_count(options);
+    if (options && options->progress)
+      return pbqp::set_error(error, PBQP_INVALID, 0,
+                             "progress is unsupported for heuristic solvers");
     pbqp::validate(problem);
+    const pbqp::Diagnostics log(options ? options->diagnostics : nullptr,
+                                options ? options->diagnostic_data : nullptr);
+    log.line("r1r2rn: preparing single-thread heuristic search");
     pbqp::ReductionSearch search(*problem);
     search.prepare();
     auto status = search.run(error);

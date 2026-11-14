@@ -277,10 +277,10 @@ void test_full_clique_capacity() {
       check(bounds.lower_bound(nullptr, 0, workspace, lower) == !forbidden);
       if (!forbidden)
         check(lower == count - 1);
-      pbqp_solve_options options{4, nullptr, nullptr};
+      pbqp_solve_options options{4, nullptr, nullptr, nullptr, nullptr};
       pbqp_solution *solution = nullptr;
-      auto status = pbqp_solve_branch_and_bound_optimized_with_options(
-          &problem, &options, &solution, nullptr);
+      auto status = pbqp_solve_branch_and_bound_optimized(&problem, &options,
+                                                          &solution, nullptr);
       check(status == (forbidden ? PBQP_INFEASIBLE : PBQP_OK));
       if (!forbidden) {
         check(solution && solution->quality == PBQP_SOLUTION_OPTIMAL);
@@ -537,18 +537,17 @@ void test_coalescing_fallback() {
   };
   prefix(0);
   DiagnosticLog log;
-  const pbqp_solve_options options{4, nullptr, nullptr};
+  const pbqp_solve_options options{4, nullptr, nullptr, record_diagnostic,
+                                   &log};
   pbqp_solution *raw = nullptr;
-  check(pbqp_solve_branch_and_bound_optimized_with_diagnostics(
-            &problem, &options, record_diagnostic, &log, &raw, nullptr) ==
-        PBQP_OK);
+  check(pbqp_solve_branch_and_bound_optimized(&problem, &options, &raw,
+                                              nullptr) == PBQP_OK);
   pbqp_solution_free(raw);
   check(log.text.find("edge (0, 3) matrix entry [1,1]=-3") !=
         std::string::npos);
   check(log.text.find("generic PBQP bounds") != std::string::npos);
-  for (auto solve : {pbqp_solve_bruteforce_with_options,
-                     pbqp_solve_branch_and_bound_with_options,
-                     pbqp_solve_branch_and_bound_optimized_with_options}) {
+  for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_branch_and_bound,
+                     pbqp_solve_branch_and_bound_optimized}) {
     pbqp_solution *raw = nullptr;
     auto status = solve(&problem, &options, &raw, nullptr);
     auto deleter = [](pbqp_solution *s) noexcept { pbqp_solution_free(s); };

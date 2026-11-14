@@ -1,7 +1,7 @@
 # PBQP
 
-A PBQP library with a C API and a C++23 implementation. Reads and writes
-problems and solves them with exact and heuristic algorithms.
+A PBQP library with C API 1.0, a C++23 interface, and Python/Ruby bindings.
+Reads and writes problems and solves them with exact and heuristic algorithms.
 
 Requires CMake 3.28 or newer, Ninja, Clang 21.1 with `clang-scan-deps`,
 and oneTBB (`libtbb-dev`).
@@ -17,11 +17,11 @@ List available solvers, solve a problem, or generate a random instance:
 
 ```sh
 ./build/pbqp --help
-./build/pbqp --solve=naive --numthreads=4 examples/01_basic.pbqp
+./build/pbqp --solve=naive --numthreads=4 examples/pbqp/01_basic.pbqp
 ./build/pbqp --solve=bnbopt --numthreads=4 --heartbeat --verbose \
-  examples/09_more_bnbopts.pbqp
-./build/pbqp --solve=greedy examples/07_parallel_exact_beats_heuristics.pbqp
-./build/pbqp --solve=r1r2rn examples/07_parallel_exact_beats_heuristics.pbqp
+  examples/pbqp/09_more_bnbopts.pbqp
+./build/pbqp --solve=greedy examples/pbqp/07_parallel_exact_beats_heuristics.pbqp
+./build/pbqp --solve=r1r2rn examples/pbqp/07_parallel_exact_beats_heuristics.pbqp
 ./build/pbqp_generate --mode=regalloc --nodes=1000 --edges=3000 \
   --registers=16 --seed=42 --output=build/regalloc.pbqp
 ./build/pbqp --solve=greedy build/regalloc.pbqp
@@ -41,6 +41,7 @@ cmake --build build
 ```
 
 See the [solvers](doc/solvers.md), [file format](doc/format.md), [generator modes](doc/generation.md),
-[C API](include/pbqp.h), [architecture](doc/architecture.md), and [developer notes](AGENTS.md).
+[API reference (Doxygen)](doc/c_api.md), [programmer's guide](doc/programmers_guide.md),
+[C++ interface](include/pbqp.hpp), [architecture](doc/architecture.md), and [developer notes](AGENTS.md).
 
 Licensed under [GNU GPL v3](LICENSE).

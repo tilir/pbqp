@@ -3,6 +3,7 @@
 # See LICENSE for the full license text.
 
 set(PBQP_COMPONENT_SOURCES
+  version.cpp
   problem_api.cpp
   io.cpp
   bruteforce.cpp
@@ -10,6 +11,7 @@ set(PBQP_COMPONENT_SOURCES
   branch_and_bound_opt.cpp
   greedy.cpp
   reduction.cpp
+  solve.cpp
   solution.cpp
 )
 list(TRANSFORM PBQP_COMPONENT_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")

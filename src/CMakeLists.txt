@@ -15,6 +15,9 @@ add_subdirectory(solvers)
 find_package(TBB CONFIG REQUIRED COMPONENTS tbb)
 add_library(pbqp ${PBQP_LIBRARY_SOURCES} ${PBQP_PUBLIC_HEADERS})
 target_sources(pbqp PRIVATE FILE_SET CXX_MODULES FILES ${PBQP_LIBRARY_MODULES})
+set_target_properties(pbqp PROPERTIES
+  VERSION "${PROJECT_VERSION}"
+  SOVERSION "${PROJECT_VERSION_MAJOR}")
 target_link_libraries(pbqp PRIVATE TBB::tbb)
 target_include_directories(pbqp PUBLIC "${PROJECT_SOURCE_DIR}/include")
 pbqp_configure_cxx_target(pbqp PRIVATE)

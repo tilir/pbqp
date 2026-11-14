@@ -24,9 +24,13 @@ jobs:
           - name: Release
             build_type: Release
             sanitizer_flags: ""
+            shared_libs: "ON"
+            docs: "ON"
           - name: ASan + UBSan
             build_type: Debug
             sanitizer_flags: -fsanitize=address,undefined -fno-omit-frame-pointer
+            shared_libs: "OFF"
+            docs: "OFF"
     steps:
       - uses: actions/checkout@v4
 
@@ -41,7 +45,7 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/llvm-21.list
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang-21 clang-tools-21 clang-format-21 libclang-rt-21-dev cmake ninja-build libtbb-dev
+            clang-21 clang-tools-21 clang-format-21 libclang-rt-21-dev cmake ninja-build libtbb-dev python3 ruby doxygen
           clang++-21 --version
           clang-format-21 --version
           cmake --version
@@ -50,6 +54,9 @@ jobs:
         run: >-
           cmake -G Ninja -S . -B build
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DBUILD_SHARED_LIBS=${{ matrix.shared_libs }}
+          -DPBQP_BUILD_EXAMPLES=ON
+          -DPBQP_BUILD_DOCS=${{ matrix.docs }}
           -DCMAKE_C_COMPILER=clang-21
           -DCMAKE_CXX_COMPILER=clang++-21
           -DCMAKE_C_FLAGS="${{ matrix.sanitizer_flags }}"
@@ -67,3 +74,15 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: ctest --test-dir build --output-on-failure
+
+      - name: Generate API reference
+        if: matrix.build_type == 'Release'
+        run: cmake --build build --target docs
+
+      - name: Upload API reference
+        if: matrix.build_type == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-reference
+          path: build/docs/html
+          if-no-files-found: error

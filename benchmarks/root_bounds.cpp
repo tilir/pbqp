@@ -30,7 +30,7 @@ void root_solved(benchmark::State &state) {
   pbqp_problem problem{3, 2, nodes, edges};
   pbqp_error error{};
   pbqp_solution *raw = nullptr;
-  auto status = pbqp_solve_branch_and_bound(&problem, &raw, &error);
+  auto status = pbqp_solve_branch_and_bound(&problem, nullptr, &raw, &error);
   SolutionPtr checked(raw);
   if (status != PBQP_OK) {
     state.SkipWithError(error.message);
@@ -46,7 +46,7 @@ void root_solved(benchmark::State &state) {
   }
   checked.reset();
   for (auto iteration : state) {
-    status = pbqp_solve_branch_and_bound(&problem, &raw, &error);
+    status = pbqp_solve_branch_and_bound(&problem, nullptr, &raw, &error);
     SolutionPtr solution(raw);
     if (status != PBQP_OK) {
       state.SkipWithError(error.message);

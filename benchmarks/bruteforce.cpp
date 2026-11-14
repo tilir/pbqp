@@ -25,11 +25,10 @@ void binary20(benchmark::State &state) {
   std::vector<pbqp_node> nodes(20, pbqp_node{2, costs});
   const pbqp_problem problem{nodes.size(), 0, nodes.data(), nullptr};
   const pbqp_solve_options options{static_cast<size_t>(state.range(0)), nullptr,
-                                   nullptr};
+                                   nullptr, nullptr, nullptr};
   pbqp_error error{};
   pbqp_solution *raw = nullptr;
-  auto status =
-      pbqp_solve_bruteforce_with_options(&problem, &options, &raw, &error);
+  auto status = pbqp_solve_bruteforce(&problem, &options, &raw, &error);
   SolutionPtr checked(raw);
   if (status != PBQP_OK) {
     state.SkipWithError(error.message);
@@ -45,8 +44,7 @@ void binary20(benchmark::State &state) {
   }
   checked.reset();
   for (auto iteration : state) {
-    status =
-        pbqp_solve_bruteforce_with_options(&problem, &options, &raw, &error);
+    status = pbqp_solve_bruteforce(&problem, &options, &raw, &error);
     SolutionPtr solution(raw);
     if (status != PBQP_OK) {
       state.SkipWithError(error.message);

@@ -25,7 +25,7 @@ using SolutionPtr =
 
 void heartbeat(unsigned, void *) noexcept {}
 
-using ExactSolver = decltype(&pbqp_solve_branch_and_bound_with_options);
+using ExactSolver = decltype(&pbqp_solve_branch_and_bound);
 
 void example(benchmark::State &state, const char *path, pbqp_cost_t optimum,
              ExactSolver solve) {
@@ -39,7 +39,7 @@ void example(benchmark::State &state, const char *path, pbqp_cost_t optimum,
   }
   const pbqp_solve_options options{static_cast<size_t>(state.range(0)),
                                    state.range(1) ? heartbeat : nullptr,
-                                   nullptr};
+                                   nullptr, nullptr, nullptr};
   pbqp_solution *raw = nullptr;
   status = solve(problem.get(), &options, &raw, &error);
   SolutionPtr checked(raw);
@@ -81,8 +81,8 @@ int main(int argc, char **argv) {
   benchmark::RegisterBenchmark(
       "BranchAndBound/Example06",
       [](benchmark::State &s) {
-        example(s, "examples/06_exact_beats_heuristics.pbqp", 0,
-                pbqp_solve_branch_and_bound_with_options);
+        example(s, "examples/pbqp/06_exact_beats_heuristics.pbqp", 0,
+                pbqp_solve_branch_and_bound);
       })
       ->ArgNames({"threads", "heartbeat"})
       ->Args({1, 0})
@@ -94,8 +94,8 @@ int main(int argc, char **argv) {
   benchmark::RegisterBenchmark(
       "BranchAndBound/Example07",
       [](benchmark::State &s) {
-        example(s, "examples/07_parallel_exact_beats_heuristics.pbqp",
-                10.1112299F, pbqp_solve_branch_and_bound_with_options);
+        example(s, "examples/pbqp/07_parallel_exact_beats_heuristics.pbqp",
+                10.1112299F, pbqp_solve_branch_and_bound);
       })
       ->ArgNames({"threads", "heartbeat"})
       ->Args({1, 0})
@@ -109,8 +109,8 @@ int main(int argc, char **argv) {
   benchmark::RegisterBenchmark(
       "BranchAndBoundOpt/Example06",
       [](benchmark::State &s) {
-        example(s, "examples/06_exact_beats_heuristics.pbqp", 0,
-                pbqp_solve_branch_and_bound_optimized_with_options);
+        example(s, "examples/pbqp/06_exact_beats_heuristics.pbqp", 0,
+                pbqp_solve_branch_and_bound_optimized);
       })
       ->ArgNames({"threads", "heartbeat"})
       ->Args({1, 0})
@@ -121,9 +121,8 @@ int main(int argc, char **argv) {
   benchmark::RegisterBenchmark(
       "BranchAndBoundOpt/Example07",
       [](benchmark::State &s) {
-        example(s, "examples/07_parallel_exact_beats_heuristics.pbqp",
-                10.1112299F,
-                pbqp_solve_branch_and_bound_optimized_with_options);
+        example(s, "examples/pbqp/07_parallel_exact_beats_heuristics.pbqp",
+                10.1112299F, pbqp_solve_branch_and_bound_optimized);
       })
       ->ArgNames({"threads", "heartbeat"})
       ->Args({1, 0})
@@ -136,8 +135,8 @@ int main(int argc, char **argv) {
   benchmark::RegisterBenchmark(
       "BranchAndBoundOpt/Example08",
       [](benchmark::State &s) {
-        example(s, "examples/08_too_long_for_simple_bnb.pbqp", 161.241684F,
-                pbqp_solve_branch_and_bound_optimized_with_options);
+        example(s, "examples/pbqp/08_too_long_for_simple_bnb.pbqp", 161.241684F,
+                pbqp_solve_branch_and_bound_optimized);
       })
       ->ArgNames({"threads", "heartbeat"})
       ->Args({1, 0})
@@ -150,8 +149,8 @@ int main(int argc, char **argv) {
   benchmark::RegisterBenchmark(
       "BranchAndBoundOpt/Example09",
       [](benchmark::State &s) {
-        example(s, "examples/09_more_bnbopts.pbqp", 338.854034F,
-                pbqp_solve_branch_and_bound_optimized_with_options);
+        example(s, "examples/pbqp/09_more_bnbopts.pbqp", 338.854034F,
+                pbqp_solve_branch_and_bound_optimized);
       })
       ->ArgNames({"threads", "heartbeat"})
       ->Args({1, 0})

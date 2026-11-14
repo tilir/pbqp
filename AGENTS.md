@@ -3,7 +3,10 @@
 ## Project conventions
 
 - Keep the public API strictly C-compatible in `include/pbqp.h`; implement it
-  in C++23. The C test must compile as C and link against the implementation.
+  in C++23. Maintain `include/pbqp.hpp` as the public C++23 convenience API,
+  delegating algorithms to the C boundary. Public wrapper declarations live in
+  that header; internal algorithm declarations stay in private partitions.
+  The C test must compile as C and link against the implementation.
 - Use CMake 3.28 or newer with Ninja and CTest. Named module dependencies
   are scanned by `clang-scan-deps`. Do not add a handwritten Makefile.
 - Use Clang 21.1 (`clang-21` and `clang++-21`) for development builds.
@@ -55,7 +58,10 @@
   Do not use a different formatter version for automated changes.
 - Keep the README short: purpose, build, basic usage, and documentation links.
   Put format details in `doc/format.md`, API contracts in the public header,
-  and implementation guidance here. Keep these documents consistent.
+  and implementation guidance here. Generate the C/C++ API reference from
+  Doxygen comments in the public headers;
+  `doc/c_api.md` covers generation/version policy, and `doc/programmers_guide.md`
+  covers client integration. Keep examples executable. Keep these documents consistent.
 
 ## Source layout
 
@@ -92,6 +98,7 @@ library/format aggregates to its parent; module partition names stay unchanged.
   on memory, set-count, or word-work budget exhaustion.
 - `src/core/problem.cppm`: private `:problem` partition containing structural
   validation and dimension checks.
+- `src/api/version.cpp`: runtime C API version query, matching the header constants.
 - `src/api/problem_api.cpp`: C problem destruction and validation entry points.
 - `src/api/io.cpp`: C text input/output entry points and error translation.
 - `src/api/error.cppm`: private `:error` partition with non-throwing diagnostics.
@@ -106,6 +113,8 @@ library/format aggregates to its parent; module partition names stay unchanged.
 - `src/search/progress.cppm`: exact percentage boundaries for mixed-radix enumeration
   without multiplying domain sizes into a fixed-width counter.
 - `src/api/solution.cpp`: public assignment evaluator and solution destruction.
+- `src/api/solve.cpp`: common enum-based C solver dispatcher. Keep one dedicated
+  entry per solver with shared options; do not add callback-specific wrappers.
 - `src/api/bruteforce.cpp`: validation and ownership boundary for exhaustive search.
 - `src/solvers/naive/bruteforce.cppm`: direct single-thread lexicographic reference enumeration.
 - `src/solvers/naive/bruteforce_parallel.cppm`: private exhaustive workers, ordered coarse jobs,
@@ -322,7 +331,7 @@ an individual consumer receives increasing indices and retains its first local
 minimum. After joining, merge worker results by reference cost and lexicographic
 assignment, including feasible +/-INF costs. This preserves naive's first-minimum
 contract. Keep the single-thread naive path direct and its no-progress observer
-compiled away. The new entry point is `pbqp_solve_bruteforce_with_options`.
+compiled away. The new entry point is `pbqp_solve_bruteforce`.
 
 `bnbopt` uses the shared B&B DFS/planner/orchestrator with an optimized bounds
 strategy; keep naive's distinct first-minimum control flow separate. Original
@@ -410,6 +419,10 @@ in `doc/format.md`.
 
 ## Tools and integration
 
+If a required local tool is missing, ask the user to install it. Do not download
+or install development tools autonomously. CI dependency installation remains
+explicit in the workflow.
+
 Use `add_subdirectory` and link the `pbqp` CMake target to embed the library.
 C callers need the C++ runtime at final link time; CMake handles this.
 The `pbqp_cli` target produces the `pbqp` executable. `pbqp_generator` is the
@@ -426,16 +439,21 @@ reintroduce `solve` or `dump` positional subcommands. Problem dumping remains
 available to library users through `pbqp_write`.
 `--numthreads=N` is a positive, int-representable naive/B&B/bnbopt concurrency limit,
 accepting either named-option spelling; default 1. The C options entry point is
-`pbqp_solve_branch_and_bound_with_options`; NULL options select one thread and
+`pbqp_solve_branch_and_bound`; NULL options select one thread and
 no callback, and zero threads is invalid. All options-based exact solvers use
-`pbqp_solve_options`. Legacy exact entry points use one thread.
+`pbqp_solve_options`. Each solver has exactly one dedicated C entry point;
+do not add `_with_options`, `_with_progress`, or diagnostic variants.
+`pbqp_solve` takes a `pbqp_solver` selector followed by the shared solver
+arguments and preserves the dedicated entry contracts.
+NULL options use one thread without callbacks. Heuristics always use one thread
+and reject a non-NULL progress callback with PBQP_INVALID before preparation.
 
 `--verbose` is a valueless flag for all solvers. Send basic solver/parameter/
 problem/quality information to stderr, preserving solution stdout. Bnbopt uses
-`pbqp_solve_branch_and_bound_optimized_with_diagnostics` to report cached input
+`pbqp_solve_branch_and_bound_optimized` to report cached input
 eligibility, resource limits, component fallbacks, early proofs, and real planning
-parameters. Keep the existing `pbqp_solve_options` layout; diagnostic and progress
-callbacks have independent contexts. Diagnostics run on the calling thread during
+parameters. All solvers accept `pbqp_solve_options`; diagnostic and progress callbacks
+have independent contexts. Diagnostics run on the calling thread during
 preparation, not in DFS. Record generic status metadata in algorithms and format
 it separately in `bnbopt_diagnostics.cppm`; do not duplicate eligibility tests in
 CLI code or couple `IndependentSets` to PBQP reporting. Discarded partial
@@ -452,9 +470,9 @@ single cut may cross many percentage boundaries.
 Small search spaces may cross several percentages on one tuple. Progress
 counts covered space, not elapsed time or an ETA.
 
-The library exposes `pbqp_solve_bruteforce_with_progress` with an optional
-synchronous C callback, options-based parallel entry points, and the corresponding
-`pbqp_solve_branch_and_bound_with_progress` entry point. Keep terminal output
+All solver entry points accept shared `pbqp_solve_options`, including an
+optional synchronous progress callback for exact solvers. The sole naive and
+B&B entries are `pbqp_solve_bruteforce` and `pbqp_solve_branch_and_bound`. Keep terminal output
 in the CLI. Callbacks must not
 throw or mutate the input. Progress scratch storage is allocated before
 enumeration. The no-progress path uses a compiled-away observer, with no
@@ -519,7 +537,9 @@ The targets are available only when CMake finds `clang-format-21`.
 `.github/workflows/ci.yml` runs on pushes, pull requests, and manual dispatch.
 It uses Ubuntu 24.04, the official LLVM apt repository, Clang 21, Ninja, and
 packaged oneTBB.
-The Release job checks formatting; both Release and ASan/UBSan jobs build and
+The Release job checks formatting and uses a shared library to exercise C, C++,
+Python, and Ruby programming examples and binding tests. The sanitizer job uses
+a static library and exercises native examples. Both jobs build and
 run CTest, including the C interoperability test. Sanitizer errors fail CI,
 and leak checking remains enabled on GitHub's runner.
 
@@ -680,3 +700,42 @@ and private-preparation tests with `TSAN_OPTIONS=halt_on_error=1`. The manual
 `.github/workflows/tsan.yml` uses oneTBB v2022.3.0 and the same script.
 An uninstrumented system TBB can produce scheduler synchronization reports even
 for a minimal task-group example; do not suppress them to claim a clean run.
+
+
+## Stable API and programming examples
+
+C API 1.0 is stable: preserve existing signatures, numeric enum values, public
+struct layouts and field types, and ownership contracts within API 1.x. Changes
+to those require a major version. Compatible additions use a minor version;
+compatible fixes use a patch version. Keep header version constants, runtime
+`pbqp_get_api_version`, project VERSION, and shared-library SOVERSION consistent.
+Use enum constants instead of version macros. The text format version is
+independent of the C API version.
+
+`include/pbqp.hpp` provides public namespace `pbqp` RAII ownership, typed solver
+options, vector solutions, span evaluation, and exceptions preserving C status
+and line metadata. It is a header-only C client, not an implementation module.
+Callback exceptions are captured before crossing C, suppress later callbacks,
+and rethrow only after the synchronous solve returns. Do not promise cancellation.
+Test these public wrappers separately in `tests/test_cpp_api.cpp`.
+
+`examples/pbqp` holds task fixtures; `examples/programming` holds runnable C,
+C++, Python, and Ruby clients. Update all test, benchmark, and documentation paths
+when moving fixtures. `PBQP_BUILD_EXAMPLES` defaults OFF; C/C++ sources are always
+registered for formatting. Shared builds (`BUILD_SHARED_LIBS=ON`) set SOVERSION
+and optionally run Python/Ruby examples and binding checks when interpreters are
+available and examples/tests enabled. Do not force a shared build for native
+clients. The bindings in `bindings/python` (ctypes) and `bindings/ruby` (Fiddle)
+use only standard libraries, require an explicit library path, query API version
+before accessing layouts, and copy returned solutions before native destruction.
+Keep their enum/layout mappings aligned with `pbqp.h`. Cover independent result
+lifetimes, invalid indices/options, I/O and infeasibility statuses, and round trips.
+Never close a foreign handle concurrently with another operation on it.
+
+
+`PBQP_BUILD_DOCS` enables the optional `docs` target, using Doxygen 1.9+ with
+warnings treated as errors. `cmake/Documentation.cmake` and `doc/Doxyfile.in`
+include only `pbqp.h` and `pbqp.hpp`; internal modules are excluded. Document
+public symbols in those headers instead of copying the reference into Markdown.
+Keep the handwritten programmer's guide focused on integration and examples.
+CI Release builds the reference and uploads HTML; normal builds need no Doxygen.

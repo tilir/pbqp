@@ -28,7 +28,7 @@ bool check_result(benchmark::State &state, const pbqp_problem &problem,
                   pbqp_cost_t expected) {
   pbqp_error error{};
   pbqp_solution *raw = nullptr;
-  auto status = pbqp_solve_reduction(&problem, &raw, &error);
+  auto status = pbqp_solve_reduction(&problem, nullptr, &raw, &error);
   SolutionPtr solution(raw);
   if (status != PBQP_OK) {
     state.SkipWithError(error.message);
@@ -54,7 +54,7 @@ void measure(benchmark::State &state, const pbqp_problem &problem,
   for (auto iteration : state) {
     pbqp_solution *raw = nullptr;
     pbqp_error error{};
-    auto status = pbqp_solve_reduction(&problem, &raw, &error);
+    auto status = pbqp_solve_reduction(&problem, nullptr, &raw, &error);
     SolutionPtr solution(raw);
     if (status != PBQP_OK) {
       state.SkipWithError(error.message);
