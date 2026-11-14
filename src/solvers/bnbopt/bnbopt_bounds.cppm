@@ -1,7 +1,7 @@
 /*
  * Optimized exact bounds with clique capacity and reference-order spill DP.
  *
- * Verified small regalloc inputs use bit-mask forward checking, structural
+ * Verified regalloc inputs use dynamic-bitset forward checking, structural
  * branching order, and clique spill-count relaxations. Each relaxation performs
  * the original unary additions in node-ID order. General inputs retain the
  * ordinary B&B bounds; no real-sum estimate is used to prune rounded costs.
@@ -13,38 +13,61 @@
 module;
 #include "pbqp.h"
 #include <algorithm>
-#include <array>
-#include <bit>
+#include <vector>
 
 module pbqp:bnbopt_bounds;
+import :bitset;
 import :bnb_bounds;
 import :bnbopt_structure;
+import :independent_sets;
+import :bnbopt_pricing;
+import :diagnostics;
+import :bnbopt_diagnostics;
 
 namespace pbqp {
 class OptimizedBranchAndBoundBounds {
-  using Mask = RegallocStructure::Mask;
-  static constexpr size_t capacity = RegallocStructure::capacity;
   BranchAndBoundBounds reference;
   RegallocStructure structure;
+  IndependentSets independent;
+  RegallocPricing pricing;
 
 public:
   struct Workspace {
     BranchAndBoundBounds::Workspace baseline;
-    std::array<Mask, capacity> colored{}, allowed{};
-    std::array<pbqp_cost_t, capacity> terms{};
-    std::array<pbqp_cost_t, capacity + 1> current{}, next{};
-    std::array<bool, capacity + 1> current_live{}, next_live{};
-    Mask assigned = 0;
+    std::vector<BitSet<>> colored, allowed;
+    std::vector<pbqp_cost_t> terms, current, next;
+    std::vector<unsigned char> current_live, next_live, has_register;
+    BitSet<> assigned, pending, colors;
     explicit Workspace(const OptimizedBranchAndBoundBounds &bounds)
-        : baseline(bounds.reference) {}
+        : baseline(bounds.reference),
+          colored(std::min(bounds.workspace_nodes(), bounds.registers()),
+                  BitSet<>(bounds.workspace_nodes())),
+          allowed(bounds.workspace_nodes(), BitSet<>(bounds.registers())),
+          terms(bounds.workspace_nodes()), current(bounds.state_count()),
+          next(bounds.state_count()), current_live(bounds.state_count()),
+          next_live(bounds.state_count()),
+          has_register(bounds.workspace_nodes()),
+          assigned(bounds.workspace_nodes()), pending(bounds.workspace_nodes()),
+          colors(bounds.registers()) {}
   };
 
 private:
+  size_t state_count() const noexcept {
+    return std::max(workspace_nodes() + 1, pricing.total_weight() + 1);
+  }
+  bool capacity_bound(bool weighted, Workspace &workspace,
+                      pbqp_cost_t &cost) const noexcept;
+  size_t workspace_nodes() const noexcept {
+    return structure.eligible() ? input().num_nodes : 0;
+  }
+  size_t registers() const noexcept {
+    return structure.eligible() ? input().nodes[0].num_options - 1 : 0;
+  }
   bool prepare_terms(const size_t *tuple, size_t depth, Workspace &workspace,
                      pbqp_cost_t &cost) const noexcept;
-  bool clique_bound(Mask pending, size_t required, Workspace &workspace,
-                    pbqp_cost_t &cost) const noexcept;
-  bool strengthen(Mask clique, Workspace &workspace,
+  bool spill_bound(const BitSet<> &pending, size_t required, bool weighted,
+                   Workspace &workspace, pbqp_cost_t &cost) const noexcept;
+  bool strengthen(const BitSet<> &clique, Workspace &workspace,
                   pbqp_cost_t &cost) const noexcept;
   static void update(Workspace &workspace, size_t state,
                      pbqp_cost_t value) noexcept {
@@ -56,14 +79,34 @@ private:
 
 public:
   explicit OptimizedBranchAndBoundBounds(const pbqp_problem &p)
-      : reference(p), structure(p, reference.register_symmetric()) {}
+      : reference(p), structure(p, reference.is_pure_interference_problem()) {}
   const pbqp_problem &input() const noexcept { return reference.input(); }
   const pbqp_problem &domains() const noexcept { return structure.domains(); }
   size_t node(size_t step) const noexcept { return structure.node(step); }
   size_t option(size_t node, size_t rank) const noexcept {
     return reference.option(node, rank);
   }
+  void describe_input(Diagnostics log) const {
+    describe_bnbopt_input(input(), reference.interference_check(), structure,
+                          log);
+  }
+  void describe_structure(Diagnostics log) const {
+    describe_bnbopt_structure(structure, log);
+  }
   void prepare_search() { structure.prepare(); }
+  void prepare_capacity(Diagnostics log = {}) {
+    if (!structure.ready()) {
+      log.line(
+          "bnbopt: capacity preparation skipped: structural path unavailable");
+      return;
+    }
+    log.line("bnbopt: preparing independent-set and capacity bounds");
+    independent.prepare(structure.adjacency());
+    pricing.prepare(input(), independent);
+    describe_bnbopt_capacity(input(), independent, pricing, log);
+  }
+  const IndependentSets &patterns() const noexcept { return independent; }
+  const RegallocPricing &weights() const noexcept { return pricing; }
   bool optimized() const noexcept { return structure.ready(); }
   const RegallocStructure &graph() const noexcept { return structure; }
   bool lower_bound(const size_t *tuple, size_t depth, Workspace &workspace,
@@ -73,36 +116,39 @@ public:
 bool OptimizedBranchAndBoundBounds::prepare_terms(
     const size_t *tuple, size_t depth, Workspace &workspace,
     pbqp_cost_t &cost) const noexcept {
-  workspace.colored.fill(0);
-  workspace.assigned = 0;
+  for (auto &color : workspace.colored)
+    color.clear();
+  workspace.assigned.clear();
   size_t used = 0;
   for (size_t step = 0; step < depth; ++step) {
     size_t id = node(step), option = tuple[id];
     if (option > used + 1 || input().nodes[id].costs[option] == PBQP_INF)
       return false;
     if (option) {
-      if (structure.neighbors(id) & workspace.colored[option - 1])
+      if (structure.neighbors(id).intersects(workspace.colored[option - 1]))
         return false;
-      workspace.colored[option - 1] |= RegallocStructure::bit(id);
+      workspace.colored[option - 1].set(id);
       used = std::max(used, option);
     }
-    workspace.assigned |= RegallocStructure::bit(id);
+    workspace.assigned.set(id);
   }
   cost = 0;
-  Mask registers = RegallocStructure::full(input().nodes[0].num_options - 1);
   for (size_t id = 0; id < input().num_nodes; ++id) {
     pbqp_cost_t term;
-    if (workspace.assigned & RegallocStructure::bit(id)) {
+    if (workspace.assigned.test(id)) {
       term = input().nodes[id].costs[tuple[id]];
-      workspace.allowed[id] = 0;
+      workspace.allowed[id].clear();
+      workspace.has_register[id] = false;
     } else {
-      Mask allowed = registers;
+      auto &allowed = workspace.allowed[id];
+      allowed.fill();
       for (size_t color = 0; color < used; ++color)
-        if (structure.neighbors(id) & workspace.colored[color])
-          allowed &= ~RegallocStructure::bit(color);
-      workspace.allowed[id] = allowed;
+        if (structure.neighbors(id).intersects(workspace.colored[color]))
+          allowed.reset(color);
       auto spill = input().nodes[id].costs[0];
-      term = allowed ? std::min(spill, pbqp_cost_t{0}) : spill;
+      workspace.has_register[id] = allowed.any();
+      term =
+          workspace.has_register[id] ? std::min(spill, pbqp_cost_t{0}) : spill;
       if (term == PBQP_INF)
         return false;
     }
@@ -112,32 +158,35 @@ bool OptimizedBranchAndBoundBounds::prepare_terms(
   return true;
 }
 
-bool OptimizedBranchAndBoundBounds::clique_bound(
-    Mask pending, size_t required, Workspace &workspace,
-    pbqp_cost_t &cost) const noexcept {
+bool OptimizedBranchAndBoundBounds::spill_bound(
+    const BitSet<> &pending, size_t required, bool weighted,
+    Workspace &workspace, pbqp_cost_t &cost) const noexcept {
   // +INF is a valid reachable rounded score. Liveness cannot use a sentinel.
-  workspace.current_live.fill(false);
+  std::fill_n(workspace.current_live.begin(), required + 1, false);
   workspace.current_live[0] = true;
   workspace.current[0] = 0;
   // State 'required' also represents larger spill counts. Future choices in
   // this relaxation depend only on the state, so the cheapest prefix suffices.
   for (size_t id = 0; id < input().num_nodes; ++id) {
-    if (!(pending & RegallocStructure::bit(id))) {
+    if (!pending.test(id)) {
       for (size_t state = 0; state <= required; ++state)
         if (workspace.current_live[state])
           workspace.current[state] =
               pbqp_cost_add(workspace.current[state], workspace.terms[id]);
       continue;
     }
-    workspace.next_live.fill(false);
+    std::fill_n(workspace.next_live.begin(), required + 1, false);
     auto spill = input().nodes[id].costs[0];
+    bool has_register = workspace.has_register[id];
+    size_t weight = weighted ? pricing.weight(id) : 1;
     for (size_t state = 0; state <= required; ++state) {
       if (!workspace.current_live[state])
         continue;
-      if (workspace.allowed[id])
+      if (has_register)
         update(workspace, state, pbqp_cost_add(workspace.current[state], 0));
       if (spill != PBQP_INF)
-        update(workspace, std::min(required, state + 1),
+        update(workspace,
+               weight >= required - state ? required : state + weight,
                pbqp_cost_add(workspace.current[state], spill));
     }
     std::copy_n(workspace.next.begin(), required + 1,
@@ -152,23 +201,56 @@ bool OptimizedBranchAndBoundBounds::clique_bound(
 }
 
 bool OptimizedBranchAndBoundBounds::strengthen(
-    Mask clique, Workspace &workspace, pbqp_cost_t &cost) const noexcept {
-  Mask pending = clique & ~workspace.assigned;
-  Mask colors = 0;
+    const BitSet<> &clique, Workspace &workspace,
+    pbqp_cost_t &cost) const noexcept {
+  auto &pending = workspace.pending;
+  pending.assign_difference(clique, workspace.assigned);
+  auto &colors = workspace.colors;
+  colors.clear();
   size_t forced = 0, can_spill = 0;
-  for (Mask remaining = pending; remaining; remaining &= remaining - 1) {
-    size_t id = std::countr_zero(remaining);
-    colors |= workspace.allowed[id];
-    forced += workspace.allowed[id] == 0;
+  for (size_t id = pending.first(); id < pending.size();
+       id = pending.next(id)) {
+    colors.unite_with(workspace.allowed[id]);
+    forced += !workspace.has_register[id];
     can_spill += input().nodes[id].costs[0] != PBQP_INF;
   }
-  size_t count = std::popcount(pending), available = std::popcount(colors);
+  size_t count = pending.count(), available = colors.count();
   if (count <= available || count - available <= forced)
     return true;
   size_t required = count - available;
   if (required > can_spill)
     return false;
-  return clique_bound(pending, required, workspace, cost);
+  return spill_bound(pending, required, false, workspace, cost);
+}
+
+bool OptimizedBranchAndBoundBounds::capacity_bound(
+    bool weighted, Workspace &workspace, pbqp_cost_t &cost) const noexcept {
+  auto &pending = workspace.pending;
+  pending.fill();
+  pending.subtract(workspace.assigned);
+  size_t total = 0, capacity = 0;
+  for (size_t id = pending.first(); id < pending.size(); id = pending.next(id))
+    total += weighted ? pricing.weight(id) : 1;
+  if (!total)
+    return true;
+  for (size_t color = 0; color < registers(); ++color) {
+    size_t best = 0;
+    for (const auto &pattern : independent) {
+      if (color < workspace.colored.size() &&
+          !workspace.colored[color].is_subset_of(pattern))
+        continue;
+      size_t available = 0;
+      for (size_t id = pattern.first(); id < pattern.size();
+           id = pattern.next(id))
+        if (pending.test(id) && workspace.allowed[id].test(color))
+          available += weighted ? pricing.weight(id) : 1;
+      best = std::max(best, available);
+    }
+    if (best >= total - capacity)
+      return true;
+    capacity += best;
+  }
+  return spill_bound(pending, total - capacity, weighted, workspace, cost);
 }
 
 bool OptimizedBranchAndBoundBounds::lower_bound(
@@ -178,7 +260,13 @@ bool OptimizedBranchAndBoundBounds::lower_bound(
     return reference.lower_bound(tuple, depth, workspace.baseline, cost);
   if (!prepare_terms(tuple, depth, workspace, cost))
     return false;
-  for (Mask clique : structure.cliques())
+  if (independent.complete()) {
+    if (pricing.ready() && !capacity_bound(true, workspace, cost))
+      return false;
+    if (!capacity_bound(false, workspace, cost))
+      return false;
+  }
+  for (const auto &clique : structure.cliques())
     if (!strengthen(clique, workspace, cost))
       return false;
   // Feasible edge terms are all zero in this verified shape. They cannot

@@ -11,16 +11,27 @@
  */
 module;
 #include "pbqp.h"
+#include <algorithm>
+#include <atomic>
 #include <memory>
+#include <new>
 #include <source_location>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 module pbqp;
 import :branch_and_bound;
 import :problem;
 import :search_tasks;
+import :bnb_work_queue;
+import :bnb_worker;
+import :bnb_bounds;
+import :bnb_tasks;
+import :bnb_incumbent;
+import :search_progress;
+import :parallel;
 
 namespace {
 void check(bool condition,
@@ -50,6 +61,14 @@ void test_singleton_frontier() {
   });
   check(calls == 2 && closed.tasks.empty());
   check(closed.covered_depths == std::vector<size_t>{1024});
+  pbqp::BranchAndBoundBounds bounds(problem);
+  pbqp::BranchAndBoundIncumbent incumbent(problem.num_nodes);
+  pbqp::PrefixPlanner<pbqp::BranchAndBoundBounds> planner(bounds, incumbent);
+  auto bounded = planner.build(pbqp::BranchAndBoundSettings(4));
+  check(!bounded.tasks.empty() && bounded.calls <= 512);
+  if (bounded.calls > 1)
+    for (const auto &prefix : bounded.tasks)
+      check(prefix.task.ranks.size() >= 1024);
 }
 
 struct Progress {
@@ -106,10 +125,118 @@ void test_root_seed_policy() {
   pbqp_problem loose{3, 3, nodes, edges};
   check_seed_policy(loose, true, true, PBQP_OK, 1);
 }
+void test_dispatch_failure() {
+  pbqp::AdaptivePlan plan;
+  plan.tasks.push_back({});
+  pbqp::CoarseWorkQueue queue(1, 2, plan);
+  pbqp::PrefixTask held;
+  held.ranks.reserve(1);
+  pbqp_cost_t bound;
+  check(queue.take(held, bound));
+  std::vector<pbqp::PrefixTask> waiting(2);
+  for (auto &task : waiting)
+    task.ranks.reserve(1);
+  bool caught = false;
+  try {
+    pbqp::run_parallel(
+        2,
+        [&](size_t id) {
+          if (!id)
+            throw std::bad_alloc{};
+          pbqp_cost_t cost;
+          check(!queue.take(waiting[id], cost));
+        },
+        [&]() noexcept { queue.cancel(); });
+  } catch (const std::bad_alloc &) {
+    caught = true;
+  }
+  check(caught && queue.cancelled());
+  std::atomic<size_t> calls{0};
+  pbqp::run_parallel(2, [&](size_t) { ++calls; });
+  check(calls == 2);
+}
+
+void test_runtime_donation() {
+  if (pbqp::parallel_concurrency(2) < 2)
+    return;
+  pbqp_cost_t unary[] = {1, 0, 0};
+  pbqp_cost_t matrix[] = {0, 0, 0, 0, PBQP_INF, 0, 0, 0, PBQP_INF};
+  std::vector<pbqp_node> nodes(20, pbqp_node{3, unary});
+  std::vector<pbqp_edge> edges;
+  for (size_t base = 0; base < nodes.size(); base += 5)
+    for (size_t v = 0; v < 5; ++v) {
+      size_t a = base + v, b = base + (v + 1) % 5;
+      edges.push_back({std::min(a, b), std::max(a, b), matrix});
+    }
+  pbqp_problem problem{nodes.size(), edges.size(), nodes.data(), edges.data()};
+  pbqp::BranchAndBoundBounds bounds(problem);
+  pbqp::BranchAndBoundIncumbent incumbent(nodes.size());
+  pbqp::AdaptivePlan plan;
+  plan.tasks.push_back({});
+  pbqp::CoarseWorkQueue queue(nodes.size(), 2, plan);
+  std::vector<pbqp::BranchAndBoundWorker<pbqp::BranchAndBoundBounds>> workers;
+  workers.reserve(2);
+  for (size_t id = 0; id < 2; ++id)
+    workers.emplace_back(bounds, incumbent);
+  struct CallbackLog {
+    std::atomic<unsigned> count{0};
+    std::atomic<bool> invalid{false}, entered{false};
+  } log;
+  auto callback = [](unsigned value, void *data) noexcept {
+    auto &p = *static_cast<CallbackLog *>(data);
+    if (p.entered.exchange(true))
+      p.invalid = true;
+    if (value != p.count.fetch_add(1) + 1 || value > 100)
+      p.invalid = true;
+    p.entered = false;
+  };
+  pbqp::SubtreeProgress progress(problem, callback, &log);
+  std::vector<pbqp::SubtreeProgress::Accumulator> accumulators;
+  accumulators.reserve(2);
+  for (size_t id = 0; id < 2; ++id)
+    accumulators.emplace_back(progress);
+  std::vector<size_t> donations(2);
+  std::atomic<bool> first{true};
+  pbqp::run_parallel(
+      2,
+      [&](size_t id) {
+        auto &worker = workers[id];
+        pbqp_cost_t bound;
+        while (queue.take(worker.task, bound)) {
+          if (first.exchange(false))
+            while (!queue.wants_work() && !queue.cancelled())
+              std::this_thread::yield();
+          worker.start(bound);
+          while (!queue.cancelled()) {
+            if (worker.chunk(1, [&](size_t depth) noexcept {
+                  accumulators[id].completed_prefix(depth);
+                })) {
+              queue.completed();
+              accumulators[id].flush();
+              break;
+            }
+            if (worker.share(queue))
+              ++donations[id];
+          }
+        }
+      },
+      [&]() noexcept { queue.cancel(); });
+  check(donations[0] + donations[1] > 0);
+  check(incumbent.found() && incumbent.result().cost == 4);
+  check(log.count == 100 && !log.invalid);
+  pbqp_evaluation evaluation;
+  check(pbqp_evaluate_assignment(&problem, incumbent.result().options,
+                                 nodes.size(), &evaluation,
+                                 nullptr) == PBQP_OK);
+  check(evaluation.is_feasible && evaluation.cost == 4);
+}
+
 } // namespace
 
 namespace pbqp {
 extern "C++" void run_search_internal_tests() {
+  test_dispatch_failure();
+  test_runtime_donation();
   test_singleton_frontier();
   test_root_seed_policy();
 }

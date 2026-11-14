@@ -22,6 +22,17 @@ static void record_progress(unsigned percent, void *data) {
   ++log->count;
 }
 
+typedef struct diagnostic_log {
+  unsigned count;
+  int invalid;
+} diagnostic_log;
+static void record_diagnostic(const char *message, void *data) {
+  diagnostic_log *log = (diagnostic_log *)data;
+  if (!message || !message[0])
+    log->invalid = 1;
+  ++log->count;
+}
+
 int main(void) {
   pbqp_cost_t costs[] = {4, -2};
   pbqp_node node = {2, costs};
@@ -129,6 +140,24 @@ int main(void) {
     ok =
         ok && solution->quality == PBQP_SOLUTION_OPTIMAL && solution->cost == 6;
     pbqp_solution_free(solution);
+  }
+  {
+    progress_log progress = {0, 0};
+    diagnostic_log diagnostics = {0, 0};
+    pbqp_solve_options options = {4, record_progress, &progress};
+    if (pbqp_solve_branch_and_bound_optimized_with_diagnostics(
+            &problem, &options, record_diagnostic, &diagnostics, &solution,
+            NULL) != PBQP_OK)
+      return 1;
+    ok = ok && solution->cost == -2 && progress.count == 100 &&
+         !progress.invalid && diagnostics.count > 0 && !diagnostics.invalid;
+    pbqp_solution_free(solution);
+    diagnostics.count = 0;
+    if (pbqp_solve_branch_and_bound_optimized_with_diagnostics(
+            NULL, NULL, record_diagnostic, &diagnostics, &solution, NULL) !=
+            PBQP_INVALID ||
+        solution || diagnostics.count)
+      return 1;
   }
   return ok ? 0 : 1;
 }

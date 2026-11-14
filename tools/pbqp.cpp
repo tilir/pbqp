@@ -26,12 +26,15 @@ import pbqp.command_line;
 namespace {
 void help() {
   std::cout
-      << "Usage: pbqp --solve=SOLVER [--heartbeat] [--numthreads=N] INPUT\n"
+      << "Usage: pbqp --solve=SOLVER [--heartbeat] [--verbose] "
+         "[--numthreads=N] INPUT\n"
          "       pbqp --help\n\n"
          "  --heartbeat  Print one dot per completed percent to stderr (naive "
          "or either bnb solver).\n\n"
          "  --numthreads=N  Exact-solver concurrency, positive integer "
          "(default 1).\n\n"
+         "  --verbose  Report solver parameters and optimization decisions to "
+         "stderr.\n\n"
          "Solvers:\n"
          "  naive   Exhaustive search; proves optimality or infeasibility.\n"
          "  bnb     Exact branch-and-bound; prunes bounded or forbidden "
@@ -53,12 +56,13 @@ struct SolverOptions {
   bool report_progress = false;
   bool help_requested = false;
   size_t num_threads = 1;
+  bool verbose = false;
 };
 
 std::optional<SolverOptions> parse_options(int argc, char **argv) {
   try {
     constexpr std::string_view names[] = {"--solve", "--numthreads"};
-    constexpr std::string_view flags[] = {"--heartbeat"};
+    constexpr std::string_view flags[] = {"--heartbeat", "--verbose"};
     const pbqp_tools::Arguments arguments(argc, argv, names, flags);
     if (arguments.help())
       return SolverOptions{.help_requested = true};
@@ -88,14 +92,28 @@ std::optional<SolverOptions> parse_options(int argc, char **argv) {
         throw std::invalid_argument(
             "--numthreads requires a positive integer that fits in int");
     }
-    return SolverOptions{solver, arguments.positional().front(),
-                         report_progress, false, num_threads};
+    return SolverOptions{.solver = solver,
+                         .input = arguments.positional().front(),
+                         .report_progress = report_progress,
+                         .num_threads = num_threads,
+                         .verbose = arguments.has("--verbose")};
   } catch (const std::exception &error) {
     std::cerr << error.what()
               << "\nUse --help for usage and available solvers.\n";
     return std::nullopt;
   }
 }
+void print_parameters(const SolverOptions &options) {
+  std::cerr << "solver: " << options.solver << '\n'
+            << "input: " << options.input << '\n'
+            << "thread limit: " << options.num_threads << '\n'
+            << "heartbeat: "
+            << (options.report_progress ? "enabled" : "disabled") << '\n';
+}
+void diagnostic(const char *message, void *) noexcept {
+  std::cerr << message << '\n';
+}
+
 using ProblemPtr =
     std::unique_ptr<pbqp_problem, decltype([](pbqp_problem *p) noexcept {
                       pbqp_problem_free(p);
@@ -129,7 +147,11 @@ pbqp_status solve_problem(const SolverOptions &options,
     auto solve = options.solver == "bnbopt"
                      ? pbqp_solve_branch_and_bound_optimized_with_options
                      : pbqp_solve_branch_and_bound_with_options;
-    status = solve(&problem, &config, &raw, &error);
+    if (options.solver == "bnbopt" && options.verbose)
+      status = pbqp_solve_branch_and_bound_optimized_with_diagnostics(
+          &problem, &config, diagnostic, nullptr, &raw, &error);
+    else
+      status = solve(&problem, &config, &raw, &error);
   } else {
     const pbqp_solve_options config{
         options.num_threads, options.report_progress ? heartbeat : nullptr,
@@ -179,16 +201,26 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  if (options->verbose)
+    print_parameters(*options);
   pbqp_error error{};
   ProblemPtr problem;
   auto status = read_problem(options->input, problem, error);
   if (status != PBQP_OK)
     return report_error(status, error);
 
+  if (options->verbose)
+    std::cerr << "problem: nodes=" << problem->num_nodes
+              << "; edges=" << problem->num_edges << '\n';
   SolutionPtr solution;
   status = solve_problem(*options, *problem, solution, error);
   if (status != PBQP_OK)
     return report_error(status, error);
 
+  if (options->verbose)
+    std::cerr << "result quality: "
+              << (solution->quality == PBQP_SOLUTION_OPTIMAL ? "optimal"
+                                                             : "feasible")
+              << '\n';
   return print_solution(*solution);
 }

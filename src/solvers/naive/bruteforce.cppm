@@ -30,7 +30,7 @@ class BruteForceSearch {
   std::vector<size_t> boundary;
 
   bool advance() noexcept;
-  template <class Observer> bool search(Observer observe) noexcept;
+  template <typename Observer> bool search(Observer observe) noexcept;
 
 public:
   BruteForceSearch(const pbqp_problem &p, pbqp_progress_callback callback,
@@ -57,7 +57,7 @@ bool BruteForceSearch::advance() noexcept {
   return false;
 }
 
-template <class Observer>
+template <typename Observer>
 bool BruteForceSearch::search(Observer observe) noexcept {
   bool found = false;
   do {

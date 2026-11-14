@@ -3,6 +3,8 @@
 # See LICENSE for the full license text.
 
 set(PBQP_COMPONENT_MODULES
+  bnbopt_pricing.cppm
+  bnbopt_diagnostics.cppm
   bnbopt_bounds.cppm
   bnbopt_structure.cppm)
 list(TRANSFORM PBQP_COMPONENT_MODULES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")

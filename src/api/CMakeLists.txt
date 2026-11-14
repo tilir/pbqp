@@ -18,6 +18,7 @@ pbqp_register_format_sources(${PBQP_COMPONENT_SOURCES})
 set(PBQP_COMPONENT_MODULES
   api_boundary.cppm
   error.cppm
+  diagnostics.cppm
 )
 list(TRANSFORM PBQP_COMPONENT_MODULES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 list(APPEND PBQP_LIBRARY_MODULES ${PBQP_COMPONENT_MODULES})

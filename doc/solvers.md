@@ -67,31 +67,42 @@ added in exactly the reference order. Monotonic rounded addition preserves the
 bound through negative costs, cancellation, and overflow. Suffix sums are never
 regrouped. Explicit INF and an overflowed accumulated sum remain separate.
 
-For uniform regalloc-shaped inputs, B&B also detects register symmetry directly
-from the input: nonzero options have zero unary costs, spill rows/columns and
+For the pure interference subset of register-allocation inputs, B&B verifies
+a sufficient condition for register symmetry directly from the input: nonzero options have zero unary costs, spill rows/columns and
 unequal-register pairs are zero, and equal-register pairs are INF. Only after
 all nodes and matrices pass this test are new registers introduced in ascending
 order. Every discarded naming has a retained renaming with the same reference
 terms, so this removes redundant subtrees without changing the optimum. General
-PBQP inputs use the unrestricted search.
+PBQP inputs use the unrestricted search. Coalescing may already change these
+matrices in the original input, and R2 need not preserve this shape. Failing
+the pure-interference test does not imply absence of register-label symmetry.
+The reduction seed works on its own graph copy; its matrices never replace
+the original problem used by B&B or its cached structural checks.
 
-Preparation grows a frontier of viable prefixes toward roughly 32 coarse jobs
-per requested thread. Depth follows available work and heterogeneous domains,
-rather than a fixed number of nodes. Very large domains group adjacent child
-prefixes; planning also has a finite fan-out expansion budget. Runs of
-single-option nodes are appended in place and checked once, without consuming
-that budget, so a long forced prefix does not prevent later parallel branching. Prefixes already closed
-during planning are retained as progress events. The same planning policy helps
-single-thread search, which executes directly without invoking the TBB scheduler.
+Preparation targets `max(32, 2 * available_workers)` coarse jobs and stops after
+512 conditioned-bound checks or 25 ms, whichever comes first. A running bound
+may exceed the deadline. Both frontier expansion and queued-job selection prefer
+lower conditioned bounds, with insertion order breaking ties. Domains determine
+prefix depth; unchecked siblings become range jobs on budget exhaustion. Forced
+single-option runs are appended in place and checked once. Closed planning
+prefixes are retained as deferred progress events.
 
-Each TBB consumer claims jobs from a shared atomic index and runs iterative
-sequential DFS within each subtree. Jobs are never created per DFS vertex.
-Immutable input/minima are shared; assignments, DFS cursors, bound scratch, and
-local best solutions belong to workers. Allocations occur during preparation
-and TBB orchestration, outside DFS. C API calls remain synchronous, joining all
-work before returning independently owned solution storage. The options-based
-C entry point is `pbqp_solve_branch_and_bound_with_options`; legacy entry points
-use one thread. Runtime/scheduler exceptions become INTERNAL_ERROR.
+Workers keep private resumable DFS state and run chunks of at most 512 bound
+checks. If another consumer is waiting, a worker can donate an unexplored sibling
+range and lower its own cursor limit to exclude that range. The current path
+stays private. Thus whole subtrees, never individual DFS vertices, enter the
+bounded queue. Queue slots and prefix buffers are allocated during preparation;
+its mutex publishes jobs, while an atomic waiter count is only a donation hint.
+Progress counts closed prefixes in the disjoint remaining ranges.
+
+oneTBB runs fixed consumers synchronously. The requested thread count is a
+limit: TBB's available concurrency and any application-wide TBB limit can reduce
+the allocated worker count. One worker executes directly. Scheduler failure
+cancels the work queue and wakes waiting consumers before joining; no callback
+outlives the C API call. Allocation failures become NO_MEMORY and other standard
+runtime/scheduler exceptions become INTERNAL_ERROR at the shared API boundary.
+Assignments, DFS cursors, scratch, and local best storage remain private to each
+worker. Returned solution storage remains independent of the input.
 
 The final winner is checked and evaluated against the original problem. Success
 returns OPTIMAL; exhausting the remaining space without a feasible incumbent
@@ -104,13 +115,10 @@ its optimum is zero. It is available as an optional Google Benchmark case for
 prefix planning and the resulting search; changes in planning and incumbent
 arrival can change the amount of work as well as how many CPUs execute it.
 
-The frontier stays fixed after planning. TBB schedules whole consumers, and
-cannot steal a descendant from a worker's active DFS. A difficult final job can
-therefore leave other workers idle. Before introducing dynamic splitting,
-profile bounds evaluated, pruned prefixes, completed jobs, and final-job time
-per worker, together with separate preparation, seeding, planning, and search
-times. Wall-time speedup alone cannot distinguish parallel execution from a
-better order of incumbent discoveries.
+Planning and incumbent arrival can change the amount of work as well as its
+parallel distribution. The [optimization guide](bnbopts.md) explains the shared
+budgeted scheduling and the additional bounds specific to `bnbopt`. Serial warm
+search was tested but did not improve total time and is not enabled.
 
 Both examples show the benefit of exact search over the heuristics. Example 07
 also has enough search work to demonstrate parallel speedup; its benchmark
@@ -138,18 +146,24 @@ semantics remain separate.
 The optimized path requires actual verification of the uniform regalloc shape:
 all nodes have the same domain, every register unary is zero, spill rows and
 columns are zero, register diagonals are INF, and other pairs are zero. Spill
-costs may be negative or INF. The initial representation supports up to 64 nodes
-and 64 registers; all other PBQP inputs use ordinary B&B bounds and ID order.
+costs may be negative or INF. Dynamic word-vector bitsets represent nodes and
+registers without a machine-word count limit. Dense graph and clique-search
+storage has a 64 MiB preparation budget; inputs exceeding this budget and
+non-regalloc inputs use ordinary B&B bounds and ID order.
 No generator metadata is trusted, and no external MILP library is used.
 
 Preparation occurs after cheap root proofs and heuristic seeding. It constructs
 an interference graph, collects greedy cliques, and spends at most 100,000
 extensions refining a large clique with iterative search. Up to 32 valid cliques
-are retained. Finding a maximum is not required for correctness: stopping early
+are retained. Candidate ranking also has a 64-million-word work budget, and
+greedy discovery uses at most 64 starting vertices. These limits bound
+preparation effort, not input dimensions. For large graphs whose adaptive
+ordering would exceed 64 million comparisons, the tail uses a static order.
+Finding a maximum is not required for correctness: stopping early
 can only weaken the bound. The selected clique goes first in the fixed search
 order; remaining nodes prefer connections to the chosen prefix, degree, spill
 cost, then ID. Register names are canonicalized by first appearance in this
-search order. Bit masks check conflicts and allowed registers against assigned
+search order. Preallocated dynamic bitsets check conflicts and allowed registers against assigned
 neighbors in either edge orientation.
 
 Assignments remain indexed by original node ID. Prefix ranks and DFS cursors
@@ -186,11 +200,63 @@ are zero. Bounds from different cliques are combined by maximum, never by adding
 overlapping costs. There is no regrouped real-sum or double-precision pruning
 estimate. The final solution still uses the shared original-order evaluator.
 
+### Global register-capacity bounds
+
+`IndependentSets` in `core` enumerates nonempty independent sets of a simple
+undirected graph, independently of PBQP or register allocation. Preparation is
+iterative, with a 16 MiB auxiliary-storage budget, at most 10,000 sets, and an
+8-million-word work budget. Exhaustion discards partial results. Only a complete
+enumeration can upper-bound register capacity; finding some sets is insufficient.
+
+For verified regalloc inputs, each register can hold one independent set. Given
+a fixed prefix, maximize the number of allowed unassigned vertices extending
+its assigned color class, independently for each register. The sum overestimates
+how many vertices can stay in registers, so the remainder must spill. The same
+original-order DP enforces this global spill-count constraint.
+
+For finite nonnegative spill costs, bounded projected accelerated gradient may
+also choose auxiliary integer weights. Double arithmetic selects these weights
+only; it never supplies a pruning score. For each register, the actual maximum
+remaining auxiliary weight is recomputed over all independent sets. Any weight
+not accommodated by those capacities must spill. A capped-weight DP enforces
+this condition while adding original float costs in original node order, with
+reachability separate from infinite scores.
+
+Pricing uses four temperatures and at most 2,000 iterations, with a bounded
+pattern-vertex visit estimate. Nonpositive heuristic scores or unsupported costs
+disable pricing without affecting feasibility. Quantization and scaling bound
+total auxiliary weight to 32,768 and the worst-case weighted DP scan to roughly
+four million state slots. Integer sums are checked against those budgets before
+conversion or allocation. Negative/INF spill costs retain valid unweighted and
+clique bounds. Cheap root/seed and structural proofs precede the extra work.
+No external LP library is required.
+
 The C entry points are `pbqp_solve_branch_and_bound_optimized`, its
 `_with_progress` variant, and `_with_options` accepting `pbqp_solve_options`.
-Optional `BranchAndBoundOpt/Example06`, `/Example07`, and `/Example08` Google
-Benchmark cases compare thread counts and heartbeat overhead. The numerical
-and structural study of example 08 is in [example08.md](example08.md).
+Optional `BranchAndBoundOpt/Example06`, `/Example07`, `/Example08`, and `/Example09` Google
+Benchmark cases compare thread counts and heartbeat overhead. The [optimization guide](bnbopts.md) lists the additional assumptions, bounds,
+preparation budgets, and fallbacks, with reproducible benchmark commands.
+
+## Verbose diagnostics
+
+`--verbose` is a valueless flag for every solver. It writes the solver name,
+input dimensions, requested thread limit, heartbeat setting, and returned result
+quality to stderr. The normal COST/NODE records on stdout are unchanged.
+
+For `bnbopt`, it also reports cached eligibility and preparation decisions:
+input-shape mismatches with node/edge entries, dynamic-bitset support without a
+64-node/register limit, graph and clique budgets, retained witnesses, independent
+set completion or discarded partial results, weighted-pricing eligibility,
+iteration/visit/state budgets, weight scaling, and planned/prepared workers.
+An early root proof explicitly explains why later preparation was unnecessary.
+A limit on one component does not disable unrelated valid optimizations.
+
+Library callers can request the same `bnbopt` messages through
+`pbqp_solve_branch_and_bound_optimized_with_diagnostics`. Its synchronous C
+callback receives a borrowed NUL-terminated message without a newline, outside
+DFS. Diagnostic and progress contexts are independent. Existing options layout
+and entry points are preserved; messages are not a stable machine-readable
+format. No callback or terminal output is added when diagnostics are disabled.
 
 ## Greedy heuristic
 

@@ -1,10 +1,7 @@
 /*
- * Per-worker iterative DFS over a fixed branch-and-bound prefix.
- *
- * All assignments, option cursors, conditioned-bound scratch, and local best
- * storage belong to this worker. Shared input and minima are read-only.
- * Assignments use original node IDs; cursors and prefixes use search positions.
- * No allocation or exception handling occurs inside subtree search.
+ * Resumable allocation-free DFS with coarse sibling donation between chunks.
+ * A donated range is removed from the donor's cursor limits. The current path
+ * stays private; progress records only closed, disjoint prefixes.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  * Distributed under GNU GPL version 3, WITHOUT ANY WARRANTY.
@@ -14,89 +11,110 @@ module;
 #include "pbqp.h"
 #include <algorithm>
 #include <vector>
-
 module pbqp:bnb_worker;
 import :bnb_incumbent;
-import :search_tasks;
+import :bnb_work_queue;
 import :ownership;
-
 namespace pbqp {
-template <class Bounds> class BranchAndBoundWorker {
+template <typename Bounds> class BranchAndBoundWorker {
   const Bounds &bounds;
   BranchAndBoundIncumbent &incumbent;
-  std::vector<size_t> tuple;
-  std::vector<size_t> cursor;
+  std::vector<size_t> tuple, cursor, limits;
+  std::vector<pbqp_cost_t> parent_bound;
   typename Bounds::Workspace workspace;
   SolutionPtr best;
-  bool found = false;
-
-  bool advance(size_t &depth, size_t root) noexcept {
+  bool found = false, batch = false, busy = false;
+  size_t base = 0, root = 0, depth = 0;
+  bool advance() noexcept {
     while (depth > root) {
-      size_t step = depth - 1;
-      size_t node = bounds.node(step);
-      if (++cursor[step] < bounds.domains().nodes[step].num_options) {
-        tuple[node] = bounds.option(node, cursor[step]);
+      size_t step = depth - 1, id = bounds.node(step);
+      if (++cursor[step] < limits[step]) {
+        tuple[id] = bounds.option(id, cursor[step]);
         return true;
       }
       --depth;
     }
+    if (batch && ++cursor[base] < limits[base]) {
+      tuple[bounds.node(base)] = bounds.option(bounds.node(base), cursor[base]);
+      depth = root;
+      return true;
+    }
     return false;
   }
-  void keep_assignment(pbqp_cost_t cost) noexcept {
+  void keep(pbqp_cost_t cost) noexcept {
     if (!found || cost < best->cost) {
       found = true;
       best->cost = cost;
-      if (!tuple.empty())
-        std::copy(tuple.begin(), tuple.end(), best->options);
+      std::copy(tuple.begin(), tuple.end(), best->options);
       incumbent.update(best->options, cost);
     }
   }
 
 public:
+  PrefixTask task;
   BranchAndBoundWorker(const Bounds &b, BranchAndBoundIncumbent &i)
       : bounds(b), incumbent(i), tuple(b.input().num_nodes),
-        cursor(b.input().num_nodes), workspace(b),
-        best(make_solution(b.input().num_nodes)) {}
-
-  template <class Observer>
-  void search_prefix(size_t root, Observer observe) noexcept {
-    size_t depth = root;
-    for (;;) {
+        cursor(tuple.size()), limits(tuple.size()),
+        parent_bound(tuple.size() + 1), workspace(b),
+        best(make_solution(tuple.size())) {
+    task.ranks.reserve(tuple.size());
+  }
+  bool active() const noexcept { return busy; }
+  void start(pbqp_cost_t bound) noexcept {
+    base = task.ranks.size();
+    batch = task.child_begin != task.child_end;
+    root = base + batch;
+    depth = root;
+    busy = true;
+    for (size_t step = 0; step < base; ++step) {
+      cursor[step] = task.ranks[step];
+      size_t id = bounds.node(step);
+      tuple[id] = bounds.option(id, cursor[step]);
+    }
+    parent_bound[base] = bound;
+    if (batch) {
+      cursor[base] = task.child_begin;
+      limits[base] = task.child_end;
+      size_t id = bounds.node(base);
+      tuple[id] = bounds.option(id, cursor[base]);
+    }
+  }
+  template <typename Observer>
+  bool chunk(size_t quota, Observer observe) noexcept {
+    for (size_t checks = 0; checks < quota; ++checks) {
       pbqp_cost_t bound;
-      if (bounds.lower_bound(tuple.data(), depth, workspace, bound) &&
-          incumbent.can_improve(bound)) {
+      bool possible = bounds.lower_bound(tuple.data(), depth, workspace, bound);
+      if (possible && incumbent.can_improve(bound)) {
+        parent_bound[depth] = bound;
         if (depth < tuple.size()) {
           cursor[depth] = 0;
-          size_t node = bounds.node(depth);
-          tuple[node] = bounds.option(node, 0);
+          limits[depth] = bounds.domains().nodes[depth].num_options;
+          size_t id = bounds.node(depth);
+          tuple[id] = bounds.option(id, 0);
           ++depth;
           continue;
         }
-        keep_assignment(bound);
+        keep(bound);
       }
       observe(depth);
-      if (!advance(depth, root))
-        break;
+      if (!advance()) {
+        busy = false;
+        return true;
+      }
     }
+    return false;
   }
-  template <class Observer>
-  void search(const PrefixTask &task, Observer observe) noexcept {
-    size_t root = task.ranks.size();
-    for (size_t id = 0; id < root; ++id) {
-      cursor[id] = task.ranks[id];
-      size_t node = bounds.node(id);
-      tuple[node] = bounds.option(node, cursor[id]);
-    }
-    if (task.child_begin == task.child_end) {
-      search_prefix(root, observe);
-      return;
-    }
-    for (size_t rank = task.child_begin; rank < task.child_end; ++rank) {
-      cursor[root] = rank;
-      size_t node = bounds.node(root);
-      tuple[node] = bounds.option(node, rank);
-      search_prefix(root + 1, observe);
-    }
+  bool share(CoarseWorkQueue &queue) {
+    if (!queue.wants_work())
+      return false;
+    for (size_t step = base; step < depth; ++step)
+      if (cursor[step] + 1 < limits[step] &&
+          queue.donate(cursor.data(), step, cursor[step] + 1, limits[step],
+                       parent_bound[step])) {
+        limits[step] = cursor[step] + 1;
+        return true;
+      }
+    return false;
   }
 };
 } // namespace pbqp

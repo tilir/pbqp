@@ -40,6 +40,11 @@ struct Progress {
   std::atomic<unsigned> count{0};
   std::atomic<bool> invalid{false};
 };
+void record_diagnostic(const char *message, void *data) noexcept {
+  auto &text = *static_cast<std::string *>(data);
+  text += message;
+  text += '\n';
+}
 void report(unsigned percent, void *data) noexcept {
   auto &log = *static_cast<Progress *>(data);
   if (log.active.exchange(true))
@@ -304,8 +309,13 @@ void test_optimized_regalloc() {
   Progress progress;
   pbqp_solve_options configuration{4, report, &progress};
   pbqp_solution *raw = nullptr;
-  check(pbqp_solve_branch_and_bound_optimized_with_options(
-            &odd_cycles, &configuration, &raw, nullptr) == PBQP_OK);
+  std::string diagnostics;
+  check(pbqp_solve_branch_and_bound_optimized_with_diagnostics(
+            &odd_cycles, &configuration, record_diagnostic, &diagnostics, &raw,
+            nullptr) == PBQP_OK);
+  check(diagnostics.find("set count budget reached") != std::string::npos);
+  check(diagnostics.find("partial results discarded") != std::string::npos);
+  check(diagnostics.find("structural path enabled") != std::string::npos);
   SolutionPtr solution(raw);
   check(solution->quality == PBQP_SOLUTION_OPTIMAL && solution->cost == 4);
   pbqp_evaluation evaluation{};

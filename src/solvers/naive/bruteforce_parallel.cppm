@@ -38,7 +38,7 @@ class BruteForceWorker {
     }
     return false;
   }
-  template <class Observer>
+  template <typename Observer>
   void enumerate(size_t root, Observer observe) noexcept {
     std::fill(tuple.begin() + root, tuple.end(), size_t{0});
     do {
@@ -59,7 +59,7 @@ public:
       : problem(p), tuple(p.num_nodes), best(make_solution(p.num_nodes)) {}
   bool found() const noexcept { return feasible; }
   const pbqp_solution &result() const noexcept { return *best; }
-  template <class Observer>
+  template <typename Observer>
   void search(const PrefixTask &task, Observer observe) noexcept {
     size_t root = task.ranks.size();
     std::copy(task.ranks.begin(), task.ranks.end(), tuple.begin());
@@ -84,7 +84,7 @@ class ParallelBruteForceSearch {
   std::unique_ptr<SubtreeProgress> progress;
   std::vector<SubtreeProgress::Accumulator> progress_workers;
 
-  template <class Observer, class Completed>
+  template <typename Observer, typename Completed>
   void consume_tasks(size_t id, Observer observe,
                      Completed completed) noexcept {
     size_t task;

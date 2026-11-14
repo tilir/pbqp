@@ -12,21 +12,31 @@
 module;
 #include "pbqp.h"
 #include <algorithm>
-#include <bit>
 #include <chrono>
 #include <cmath>
+#include <concepts>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <limits>
+#include <memory>
 #include <random>
+#include <ranges>
 #include <source_location>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 module pbqp;
+import :bitset;
 import :bnbopt_bounds;
+import :bnb_bounds;
+import :independent_sets;
+import :bnbopt_pricing;
+import :diagnostics;
+import :bnbopt_diagnostics;
 import :problem;
 
 namespace {
@@ -38,6 +48,14 @@ void check(bool condition,
                              std::to_string(location.line()) + " " + context);
 }
 
+struct DiagnosticLog {
+  std::string text;
+};
+void record_diagnostic(const char *message, void *data) noexcept {
+  auto &log = *static_cast<DiagnosticLog *>(data);
+  log.text += message;
+  log.text += '\n';
+}
 bool evaluate(const pbqp_problem &problem, const std::vector<size_t> &tuple,
               pbqp_cost_t &cost) {
   cost = 0;
@@ -105,15 +123,12 @@ void check_prefix(const pbqp_problem &problem,
 
 void check_graph(const pbqp::OptimizedBranchAndBoundBounds &bounds) {
   const auto &graph = bounds.graph();
-  for (auto clique : graph.cliques()) {
-    auto vertices = clique;
-    while (vertices) {
-      size_t node = std::countr_zero(vertices);
-      vertices &= vertices - 1;
-      check((clique & ~pbqp::RegallocStructure::bit(node) &
-             ~graph.neighbors(node)) == 0);
-    }
-  }
+  for (const auto &clique : graph.cliques())
+    for (size_t node = clique.first(); node < clique.size();
+         node = clique.next(node))
+      for (size_t other = clique.next(node); other < clique.size();
+           other = clique.next(other))
+        check(graph.neighbors(node).test(other));
   std::vector<size_t> order;
   for (size_t step = 0; step < bounds.input().num_nodes; ++step)
     order.push_back(bounds.node(step));
@@ -122,22 +137,25 @@ void check_graph(const pbqp::OptimizedBranchAndBoundBounds &bounds) {
     check(order[id] == id);
 }
 
-void test_prefix_bounds() {
+void test_prefix_bounds(bool positive = false) {
   const auto maximum = std::numeric_limits<pbqp_cost_t>::max();
-  const std::vector<pbqp_cost_t> pool = {
-      0,
-      0.1f,
-      0.2f,
-      -0.1f,
-      1.25f,
-      -3.5f,
-      16777216.0f,
-      -16777216.0f,
-      maximum,
-      -maximum,
-      std::numeric_limits<pbqp_cost_t>::denorm_min(),
-      PBQP_INF};
+  const std::vector<pbqp_cost_t> pool =
+      positive ? std::vector<pbqp_cost_t>{0.1f, 0.2f, 1.25f, 3.5f, 10, 100}
+               : std::vector<pbqp_cost_t>{
+                     0,
+                     0.1f,
+                     0.2f,
+                     -0.1f,
+                     1.25f,
+                     -3.5f,
+                     16777216.0f,
+                     -16777216.0f,
+                     maximum,
+                     -maximum,
+                     std::numeric_limits<pbqp_cost_t>::denorm_min(),
+                     PBQP_INF};
   bool reordered = false;
+  size_t priced = 0;
   for (unsigned seed = 0; seed < 60; ++seed) {
     context = "optimized prefix seed=" + std::to_string(seed);
     std::mt19937 random(seed);
@@ -163,6 +181,8 @@ void test_prefix_bounds() {
     pbqp::validate(&problem);
     pbqp::OptimizedBranchAndBoundBounds bounds(problem);
     bounds.prepare_search();
+    bounds.prepare_capacity();
+    priced += bounds.weights().ready();
     check(bounds.optimized());
     check_graph(bounds);
     for (size_t step = 0; step < nodes.size(); ++step)
@@ -184,11 +204,15 @@ void test_prefix_bounds() {
     prefix(0, 0);
   }
   check(reordered);
+  if (positive)
+    check(priced > 0);
 }
 
-void test_mask_limits() {
-  for (size_t count : {size_t{63}, size_t{64}, size_t{65}})
-    for (size_t registers : {size_t{1}, size_t{64}, size_t{65}}) {
+void test_bitset_boundaries() {
+  for (size_t count : {size_t{63}, size_t{64}, size_t{65}, size_t{127},
+                       size_t{128}, size_t{129}})
+    for (size_t registers :
+         {size_t{1}, size_t{64}, size_t{65}, size_t{128}, size_t{129}}) {
       context = "mask nodes=" + std::to_string(count) +
                 " registers=" + std::to_string(registers);
       size_t domain = registers + 1;
@@ -202,13 +226,14 @@ void test_mask_limits() {
       pbqp_problem problem{nodes.size(), 1, nodes.data(), &edge};
       pbqp::OptimizedBranchAndBoundBounds bounds(problem);
       bounds.prepare_search();
-      check(bounds.optimized() == (count <= 64 && registers <= 64));
+      check(bounds.optimized());
+      check_graph(bounds);
       pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
       pbqp_cost_t lower;
       auto expected = bounds.optimized() && registers == 1 ? 1 : 0;
       check(bounds.lower_bound(nullptr, 0, workspace, lower) &&
             lower == expected);
-      if (bounds.optimized() && registers == 64) {
+      if (registers >= count) {
         std::vector<size_t> tuple(count);
         for (size_t step = 0; step < count; ++step)
           tuple[bounds.node(step)] = step + 1;
@@ -228,35 +253,328 @@ void test_mask_limits() {
 }
 
 void test_full_clique_capacity() {
-  // Exercise the largest useful spill-count DP: 64 mutually interfering nodes
-  // and one register require 63 spills, or prove infeasibility if spills are
-  // forbidden. No exhaustive 2^64 search is needed to establish these facts.
-  for (bool forbidden : {false, true}) {
-    pbqp_cost_t unary[] = {forbidden ? PBQP_INF : 1, 0};
-    pbqp_cost_t matrix[] = {0, 0, 0, PBQP_INF};
-    std::vector<pbqp_node> nodes(64, pbqp_node{2, unary});
-    std::vector<pbqp_edge> edges;
-    for (size_t src = 0; src < nodes.size(); ++src)
-      for (size_t tgt = src + 1; tgt < nodes.size(); ++tgt)
-        edges.push_back({src, tgt, matrix});
-    pbqp_problem problem{nodes.size(), edges.size(), nodes.data(),
-                         edges.data()};
-    pbqp::OptimizedBranchAndBoundBounds bounds(problem);
-    bounds.prepare_search();
-    check(bounds.optimized());
-    pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
-    pbqp_cost_t lower;
-    check(bounds.lower_bound(nullptr, 0, workspace, lower) == !forbidden);
-    if (!forbidden)
-      check(lower == 63);
+  // Cross multiple storage words in both the clique and spill-count DP.
+  // A complete graph with one register needs N-1 spills; forbidden spills
+  // prove infeasibility without enumerating its 2^N assignments.
+  for (size_t count : {size_t{64}, size_t{65}, size_t{129}})
+    for (bool forbidden : {false, true}) {
+      context = "clique size=" + std::to_string(count) +
+                " forbidden=" + std::to_string(forbidden);
+      pbqp_cost_t unary[] = {forbidden ? PBQP_INF : 1, 0};
+      pbqp_cost_t matrix[] = {0, 0, 0, PBQP_INF};
+      std::vector<pbqp_node> nodes(count, pbqp_node{2, unary});
+      std::vector<pbqp_edge> edges;
+      for (size_t src = 0; src < nodes.size(); ++src)
+        for (size_t tgt = src + 1; tgt < nodes.size(); ++tgt)
+          edges.push_back({src, tgt, matrix});
+      pbqp_problem problem{nodes.size(), edges.size(), nodes.data(),
+                           edges.data()};
+      pbqp::OptimizedBranchAndBoundBounds bounds(problem);
+      bounds.prepare_search();
+      check(bounds.optimized());
+      pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
+      pbqp_cost_t lower;
+      check(bounds.lower_bound(nullptr, 0, workspace, lower) == !forbidden);
+      if (!forbidden)
+        check(lower == count - 1);
+      pbqp_solve_options options{4, nullptr, nullptr};
+      pbqp_solution *solution = nullptr;
+      auto status = pbqp_solve_branch_and_bound_optimized_with_options(
+          &problem, &options, &solution, nullptr);
+      check(status == (forbidden ? PBQP_INFEASIBLE : PBQP_OK));
+      if (!forbidden) {
+        check(solution && solution->quality == PBQP_SOLUTION_OPTIMAL);
+        check(solution->cost == static_cast<pbqp_cost_t>(count - 1));
+      }
+      pbqp_solution_free(solution);
+    }
+}
+
+void test_storage_budget_fallback() {
+  context = "dense preparation storage budget";
+  pbqp_cost_t unary[] = {1, 0};
+  std::vector<pbqp_node> nodes(100000, pbqp_node{2, unary});
+  pbqp_problem problem{nodes.size(), 0, nodes.data(), nullptr};
+  pbqp::OptimizedBranchAndBoundBounds bounds(problem);
+  bounds.prepare_search();
+  check(!bounds.optimized());
+  DiagnosticLog log;
+  bounds.describe_input(pbqp::Diagnostics(record_diagnostic, &log));
+  check(log.text.find("graph storage budget exceeded") != std::string::npos);
+  check(log.text.find("no fixed 64-node or 64-register limit") !=
+        std::string::npos);
+  check(&bounds.domains() == &problem);
+  pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
+  pbqp_cost_t lower;
+  check(bounds.lower_bound(nullptr, 0, workspace, lower));
+  check(lower == 0);
+}
+
+void test_high_register_conflict() {
+  context = "conflict across node and register words";
+  constexpr size_t count = 130, domain = 130;
+  std::vector<pbqp_cost_t> unary(domain);
+  unary[0] = 1;
+  std::vector<pbqp_cost_t> matrix(domain * domain);
+  for (size_t color = 1; color < domain; ++color)
+    matrix[color * domain + color] = PBQP_INF;
+  std::vector<pbqp_node> nodes(count, pbqp_node{domain, unary.data()});
+  std::vector<pbqp_edge> edges;
+  for (size_t id = 0; id < count; id += 2)
+    edges.push_back({id, id + 1, matrix.data()});
+  pbqp_problem problem{count, edges.size(), nodes.data(), edges.data()};
+  pbqp::OptimizedBranchAndBoundBounds bounds(problem);
+  bounds.prepare_search();
+  check(bounds.optimized());
+  pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
+  std::vector<size_t> tuple(count);
+  for (size_t step = 0; step < count - 1; ++step)
+    tuple[bounds.node(step)] = step + 1;
+  pbqp_cost_t lower;
+  check(bounds.lower_bound(tuple.data(), count - 1, workspace, lower));
+  check(!workspace.allowed[bounds.node(count - 1)].test(128));
+  tuple[bounds.node(count - 1)] = 129;
+  check(!bounds.lower_bound(tuple.data(), count, workspace, lower));
+  tuple[bounds.node(count - 1)] = 0;
+  check(bounds.lower_bound(tuple.data(), count, workspace, lower));
+  check(lower == 1);
+}
+
+template <typename Word>
+concept BitSetWord = requires { typename pbqp::BitSet<Word>; };
+static_assert(BitSetWord<unsigned> && !BitSetWord<int> && !BitSetWord<bool> &&
+              !BitSetWord<const unsigned>);
+
+template <typename Word> void test_bitsets() {
+  pbqp::BitSet<Word> a(9), b(9), empty;
+  a.set(0);
+  a.set(1);
+  b.set(0);
+  b.set(2);
+  check(a.intersects(b) && !(a == b));
+  a.clear();
+  b.clear();
+  check(!a.intersects(b) && a == b && !(a == empty));
+  std::mt19937 random(42);
+  for (size_t size : {size_t{0}, size_t{1}, size_t{63}, size_t{64}, size_t{65},
+                      size_t{127}, size_t{128}, size_t{129}, size_t{257}}) {
+    context = "bitset size=" + std::to_string(size);
+    pbqp::BitSet<Word> a(size), b(size), result(size);
+    std::vector<bool> x(size), y(size);
+    for (size_t round = 0; round < 20; ++round) {
+      a.clear();
+      b.fill();
+      for (size_t id = 0; id < size; ++id) {
+        x[id] = random() % 2;
+        y[id] = random() % 2;
+        if (x[id])
+          a.set(id);
+        if (!y[id])
+          b.reset(id);
+        check(a.test(id) == x[id] && b.test(id) == y[id]);
+      }
+      check(a.count() ==
+            static_cast<size_t>(std::count(x.begin(), x.end(), true)));
+      size_t visited = 0;
+      for (size_t id = a.first(); id < size; id = a.next(id)) {
+        check(x[id]);
+        ++visited;
+      }
+      check(visited == a.count());
+      result.assign_intersection(a, b);
+      check(result.count() == a.intersection_count(b));
+      check(result.any() == a.intersects(b));
+      check(result.is_subset_of(a) && result.is_subset_of(b));
+      check(a.is_subset_of(b) == (result.count() == a.count()));
+      for (size_t id = 0; id < size; ++id)
+        check(result.test(id) == (x[id] && y[id]));
+      result.copy_from(a);
+      check(result == a);
+      result.intersect_with(b);
+      for (size_t id = 0; id < size; ++id)
+        check(result.test(id) == (x[id] && y[id]));
+      result.assign_difference(a, b);
+      for (size_t id = 0; id < size; ++id)
+        check(result.test(id) == (x[id] && !y[id]));
+      result.copy_from(a);
+      result.subtract(b);
+      result.unite_with(b);
+      for (size_t id = 0; id < size; ++id)
+        check(result.test(id) == (x[id] || y[id]));
+      result.fill();
+      check(result.count() == size && result.next(size) == size);
+    }
   }
 }
+
+static_assert(std::ranges::random_access_range<pbqp::IndependentSets>);
+static_assert(std::ranges::sized_range<const pbqp::IndependentSets>);
+static_assert(
+    std::same_as<std::ranges::range_reference_t<pbqp::IndependentSets>,
+                 const pbqp::BitSet<> &>);
+
+void test_independent_sets() {
+  std::mt19937 random(29);
+  for (size_t count = 0; count <= 8; ++count)
+    for (size_t trial = 0; trial < 20; ++trial) {
+      context = "independent sets n=" + std::to_string(count);
+      std::vector<pbqp::BitSet<>> graph(count, pbqp::BitSet<>(count));
+      for (size_t src = 0; src < count; ++src)
+        for (size_t tgt = src + 1; tgt < count; ++tgt)
+          if (random() % 2) {
+            graph[src].set(tgt);
+            graph[tgt].set(src);
+          }
+      pbqp::IndependentSets sets;
+      sets.prepare(graph);
+      check(sets.complete());
+      std::vector<size_t> expected, actual;
+      for (size_t mask = 1; mask < (size_t{1} << count); ++mask) {
+        bool independent = true;
+        for (size_t src = 0; src < count; ++src)
+          for (size_t tgt = src + 1; tgt < count; ++tgt)
+            if ((mask & (size_t{1} << src)) && (mask & (size_t{1} << tgt)) &&
+                graph[src].test(tgt))
+              independent = false;
+        if (independent)
+          expected.push_back(mask);
+      }
+      for (const auto &set : sets) {
+        size_t mask = 0;
+        for (size_t id = set.first(); id < count; id = set.next(id))
+          mask |= size_t{1} << id;
+        actual.push_back(mask);
+      }
+      std::sort(actual.begin(), actual.end());
+      check(actual == expected);
+      check(sets.size() == expected.size() && sets.empty() == expected.empty());
+      check(static_cast<size_t>(std::ranges::distance(sets)) == sets.size());
+    }
+  std::vector<pbqp::BitSet<>> empty_edges(65, pbqp::BitSet<>(65));
+  pbqp::IndependentSets incomplete;
+  incomplete.prepare(empty_edges);
+  check(!incomplete.complete() && incomplete.empty());
+  check(incomplete.status() == pbqp::IndependentSetStatus::SetBudget);
+  check(incomplete.num_examined() == 10000);
+  check(incomplete.num_entries() == 0 && incomplete.maximum_size() == 0);
+}
+
+void test_pricing_limits() {
+  constexpr size_t count = 16;
+  std::vector<pbqp::BitSet<>> graph(count, pbqp::BitSet<>(count, true));
+  for (size_t id = 0; id < count; ++id)
+    graph[id].reset(id);
+  pbqp::IndependentSets sets;
+  sets.prepare(graph);
+  check(sets.complete());
+  pbqp_cost_t unary[] = {std::numeric_limits<pbqp_cost_t>::max(), 0};
+  std::vector<pbqp_node> nodes(count, pbqp_node{2, unary});
+  pbqp_cost_t matrix[] = {0, 0, 0, PBQP_INF};
+  std::vector<pbqp_edge> edges;
+  for (size_t src = 0; src < count; ++src)
+    for (size_t tgt = src + 1; tgt < count; ++tgt)
+      edges.push_back({src, tgt, matrix});
+  pbqp_problem problem{nodes.size(), edges.size(), nodes.data(), edges.data()};
+  pbqp::RegallocPricing pricing;
+  pricing.prepare(problem, sets);
+  check(pricing.ready() && pricing.total_weight() <= 32768);
+  size_t sum = 0;
+  for (size_t id = 0; id < count; ++id)
+    sum += pricing.weight(id);
+  check(sum == pricing.total_weight());
+  pbqp::OptimizedBranchAndBoundBounds bounds(problem);
+  bounds.prepare_search();
+  DiagnosticLog log;
+  bounds.prepare_capacity(pbqp::Diagnostics(record_diagnostic, &log));
+  check(bounds.weights().ready());
+  check(log.text.find("auxiliary weights scaled down") != std::string::npos);
+  pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
+  pbqp_cost_t lower;
+  check(bounds.lower_bound(nullptr, 0, workspace, lower) && lower == PBQP_INF);
+  for (auto unsupported : {pbqp_cost_t{-1}, PBQP_INF}) {
+    unary[0] = unsupported;
+    pbqp::RegallocPricing fallback;
+    fallback.prepare(problem, sets);
+    check(!fallback.ready() && fallback.total_weight() == 0);
+    check(fallback.status() == pbqp::PricingStatus::UnsupportedCost);
+    DiagnosticLog rejected;
+    pbqp::describe_bnbopt_capacity(
+        problem, sets, fallback,
+        pbqp::Diagnostics(record_diagnostic, &rejected));
+    check(rejected.text.find("requires finite nonnegative spills") !=
+          std::string::npos);
+  }
+}
+
+void test_coalescing_fallback() {
+  context = "coalescing is not pure interference";
+  // Three conflicts force different colors at the ends of this path, while
+  // coalescing rewards equal endpoint colors. Spilling costs more than the
+  // reward, so the optimum is zero despite an independent-term bound of -3.
+  pbqp_cost_t unary[] = {7, 0, 0};
+  pbqp_node nodes[] = {{3, unary}, {3, unary}, {3, unary}, {3, unary}};
+  pbqp_cost_t conflict[] = {0, 0, 0, 0, PBQP_INF, 0, 0, 0, PBQP_INF};
+  pbqp_cost_t coalesce[] = {0, 0, 0, 0, -3, 0, 0, 0, -3};
+  pbqp_edge edges[] = {
+      {0, 1, conflict}, {1, 2, conflict}, {2, 3, conflict}, {0, 3, coalesce}};
+  pbqp_problem problem{4, 4, nodes, edges};
+  pbqp::BranchAndBoundBounds ordinary(problem);
+  check(!ordinary.is_pure_interference_problem());
+  pbqp::OptimizedBranchAndBoundBounds bounds(problem);
+  bounds.prepare_search();
+  bounds.prepare_capacity();
+  check(!bounds.optimized());
+  pbqp::OptimizedBranchAndBoundBounds::Workspace workspace(bounds);
+  std::vector<size_t> tuple(4);
+  std::function<void(size_t)> prefix = [&](size_t depth) {
+    check_prefix(problem, bounds, workspace, tuple, depth);
+    if (depth == tuple.size())
+      return;
+    for (size_t option = 0; option < 3; ++option) {
+      tuple[depth] = option;
+      prefix(depth + 1);
+    }
+  };
+  prefix(0);
+  DiagnosticLog log;
+  const pbqp_solve_options options{4, nullptr, nullptr};
+  pbqp_solution *raw = nullptr;
+  check(pbqp_solve_branch_and_bound_optimized_with_diagnostics(
+            &problem, &options, record_diagnostic, &log, &raw, nullptr) ==
+        PBQP_OK);
+  pbqp_solution_free(raw);
+  check(log.text.find("edge (0, 3) matrix entry [1,1]=-3") !=
+        std::string::npos);
+  check(log.text.find("generic PBQP bounds") != std::string::npos);
+  for (auto solve : {pbqp_solve_bruteforce_with_options,
+                     pbqp_solve_branch_and_bound_with_options,
+                     pbqp_solve_branch_and_bound_optimized_with_options}) {
+    pbqp_solution *raw = nullptr;
+    auto status = solve(&problem, &options, &raw, nullptr);
+    auto deleter = [](pbqp_solution *s) noexcept { pbqp_solution_free(s); };
+    std::unique_ptr<pbqp_solution, decltype(deleter)> solution(raw, deleter);
+    check(status == PBQP_OK && solution && solution->cost == 0);
+    check(solution->quality == PBQP_SOLUTION_OPTIMAL);
+  }
+}
+
 } // namespace
 
 namespace pbqp {
 extern "C++" void run_bnbopt_internal_tests() {
+  test_coalescing_fallback();
+  test_independent_sets();
+  test_pricing_limits();
+  test_bitsets<unsigned char>();
+  test_bitsets<unsigned short>();
+  test_bitsets<unsigned>();
+  test_bitsets<unsigned long>();
+  test_bitsets<std::uint64_t>();
   test_prefix_bounds();
-  test_mask_limits();
+  test_prefix_bounds(true);
+  test_bitset_boundaries();
+  test_high_register_conflict();
+  test_storage_budget_fallback();
   test_full_clique_capacity();
 }
 } // namespace pbqp

@@ -21,7 +21,7 @@ module pbqp:problem;
 import :failure;
 
 namespace pbqp {
-template <class T> void check_count(size_t n, size_t line = 0) {
+template <typename T> void check_count(size_t n, size_t line = 0) {
   if (n > std::numeric_limits<size_t>::max() / sizeof(T))
     fail(PBQP_OVERFLOW, "allocation size overflow", line);
 }

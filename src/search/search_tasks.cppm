@@ -57,7 +57,7 @@ void batch_children(PrefixPlan &plan, const PrefixTask &parent, size_t count,
   }
 }
 
-template <class Keep>
+template <typename Keep>
 PrefixPlan plan_prefixes(const pbqp_problem &problem, size_t threads,
                          Keep keep) {
   PrefixPlan plan;

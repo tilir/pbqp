@@ -27,7 +27,7 @@ size_t thread_count(const pbqp_solve_options *options) {
   return count;
 }
 
-template <class Operation>
+template <typename Operation>
 pbqp_status api_call(pbqp_error *error, Operation operation) noexcept {
   clear_error(error);
   try {

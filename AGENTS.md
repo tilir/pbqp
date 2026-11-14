@@ -49,6 +49,7 @@
 - Use C++ streams for file and terminal I/O, and standard library ownership
   and containers internally. Avoid C stdio and allocation functions in C++ code.
 - Do not introduce helper macros. Use functions, templates, and typed constants.
+- Use `typename`, rather than `class`, for template type parameters.
 - Follow LLVM formatting using `clang-format-21` and the root `.clang-format`:
   two-space indentation, no tabs. Format C, C++, and module interface files.
   Do not use a different formatter version for automated changes.
@@ -82,12 +83,21 @@ library/format aggregates to its parent; module partition names stay unchanged.
 - `src/io/text_reader.cppm`: private `:text_reader` partition containing the stream
   tokenizer, comment handling, line tracking, and numeric parser.
 - `src/io/text_writer.cppm`: private `:text_writer` partition for cost serialization.
+- `src/core/bitset.cppm`: dynamic word-vector bitsets with preallocated destination
+  operations and set-bit iteration; use `BitSet<Word = unsigned>` with an
+  unsigned integral word other than bool, keep padding bits clear, and prefer
+  standard algorithms for ordinary word-vector operations.
+- `src/core/independent_sets.cppm`: generic complete independent-set enumeration
+  over adjacency bitsets, independent of PBQP/RA. Discard incomplete results
+  on memory, set-count, or word-work budget exhaustion.
 - `src/core/problem.cppm`: private `:problem` partition containing structural
   validation and dimension checks.
 - `src/api/problem_api.cpp`: C problem destruction and validation entry points.
 - `src/api/io.cpp`: C text input/output entry points and error translation.
 - `src/api/error.cppm`: private `:error` partition with non-throwing diagnostics.
 - `src/core/failure.cppm`: private `:failure` partition for parsing/validation errors.
+- `src/api/diagnostics.cppm`: optional synchronous C diagnostic sink; format
+  preparation messages only when a callback is present, never inside DFS.
 - `src/api/api_boundary.cppm`: shared C API exception translation, including
   allocation failures and container size limits.
 - `src/core/ownership.cppm`: vector-backed problem and solution storage behind C
@@ -102,17 +112,23 @@ library/format aggregates to its parent; module partition names stay unchanged.
   and a final cost/lexicographic reduction without per-tuple shared-best locking.
 - `src/api/branch_and_bound.cpp`: validation and ownership boundary for exact search.
 - `src/solvers/bnb/branch_and_bound.cppm`: coarse prefix queue and per-worker orchestration.
-- `src/solvers/bnbopt/bnbopt_structure.cppm`: verified small-regalloc graph,
+- `src/solvers/bnbopt/bnbopt_structure.cppm`: verified regalloc graph,
   bounded clique discovery, clique-first order, and ordered domain views.
-- `src/solvers/bnbopt/bnbopt_bounds.cppm`: bit-mask forward checking and
-  reference-order DP for clique spill-count constraints, with generic fallback.
+- `src/solvers/bnbopt/bnbopt_bounds.cppm`: forward checking and original-order
+  cost DP for clique, global cardinality, and integer-weight capacities.
+- `src/solvers/bnbopt/bnbopt_pricing.cppm`: bounded heuristic double pricing,
+  checked quantization/scaling, and auxiliary integer weights. Never prune on
+  its real-sum score.
 - `src/api/branch_and_bound_opt.cpp`: optimized solver C validation/ownership
   boundary and plain/progress/options entry points.
 - `src/solvers/bnb/bnb_bounds.cppm`: immutable minima, option order, checked regalloc symmetry,
   forward checking, and reference-order conditioned bounds. Keep construction
   as named preparation steps and individual bound terms as small helpers.
 - `src/solvers/bnb/bnb_incumbent.cppm`: mutex-protected assignment and atomic cost/feasibility.
-- `src/solvers/bnb/bnb_tasks.cppm`: adaptive viable-prefix frontier and large-domain batches.
+- `src/solvers/bnb/bnb_tasks.cppm`: work/time-budgeted best-bound frontier,
+  compressed forced runs, deferred closures, and unchecked sibling batches.
+- `src/solvers/bnb/bnb_work_queue.cppm`: bounded preallocated priority prefix
+  queue, optional sibling donation to waiting consumers, and cancellation.
 - `src/solvers/bnb/bnb_worker.cppm`: bounds-strategy worker with original-ID assignments, search-position cursors,
   private scratch/local best, and iterative
   allocation-free DFS within one prefix subtree.
@@ -275,23 +291,30 @@ checks never copy the incumbent assignment. Stale upper bounds allow extra work.
 Prune `L >= G` whenever a feasible incumbent exists, including overflowed +INF.
 Without an incumbent, infinity alone cannot discard a feasible subtree.
 
-Detect register symmetry only after checking every original unary and matrix:
+Verify the pure-interference model, a sufficient case for register symmetry,
+only after checking every original unary and matrix:
 all nodes share a domain, registers cost zero, spill rows/columns are zero,
 register diagonals INF, and other register pairs zero. Canonicalize new register
 names in order of first appearance. Renaming preserves reference terms; do not
-apply this optimization to arbitrary PBQP matrices or unequal domains.
+apply this optimization to arbitrary PBQP matrices or unequal domains. Coalescing in the original input and R2 fill need not
+preserve this model; rejecting its shape is not proof of absent symmetry.
 
-Use an adaptive viable-prefix frontier with about 32 jobs per requested worker,
-child batches for huge domains, and a bounded fan-out expansion budget.
-Append singleton runs in place, check their resulting prefix once, and do not
-charge them to the branching budget. A long forced prefix must not remove
-requested concurrency when branching follows it. The
-single-thread path uses the same planner but no scheduler. A oneTBB task_arena
-and task_group run fixed consumers claiming whole subtrees from an atomic
-index. Never create a task per DFS vertex or implement a custom thread pool.
-Allocate worker scratch before search; TBB runtime allocations stay outside DFS.
-Keep all input/worker storage alive through task-group completion. Report
-closed planning prefixes only after preparation succeeds. See `doc/solvers.md`.
+Use `max(32, 2 * available_workers)` as the B&B frontier target, with at most
+512 lower-bound calls or 25 ms of planning. A running bound may exceed the time
+budget. Retain unchecked siblings as range jobs; compress singleton runs and
+check their resulting prefix once. Prefer lower bounds both while expanding
+and while claiming jobs; insertion order breaks ties, including equal infinities.
+
+Run private resumable DFS in chunks of 512 bound checks. Donate unexplored
+sibling ranges only when another consumer waits, and remove donated ranks from
+the donor's private limits. Preallocate queue slots, prefix buffers, and every
+worker's scratch. Mutex publication protects jobs; relaxed waiter counts are
+hints only. Do not create a TBB task per DFS vertex or implement custom threads.
+Use oneTBB fixed consumers and cap prepared workers to available TBB concurrency.
+The single-thread path does not start the scheduler. Cancellation must wake idle
+queue consumers before joining on a scheduler error. No callback may outlive the
+synchronous call. Preparation failures emit no progress. Serial warming was
+measured and is not enabled. See `doc/solvers.md` and `doc/bnbopts.md`.
 
 Parallel naive uses the same TBB dispatcher, prefix jobs, and coverage counter,
 but no heuristic or bound can prune a tuple. Sort its jobs lexicographically;
@@ -309,13 +332,18 @@ view, node mapping, workspace, preparation, and lower-bound calculation.
 Allocate progress only after the order is prepared, using that domain view.
 TBB dispatch borrows a callable context synchronously, with no owning type erasure.
 
-The optimized path is restricted to verified uniform regalloc graphs with up to
-64 nodes and registers. Otherwise preserve ordinary bounds and ID order. Build
+The optimized path is restricted to verified uniform regalloc graphs. Use
+vector-backed word bitsets for nodes and registers, without a word-width count
+limit. Bound dense graph/clique-search storage to 64 MiB; larger inputs retain
+ordinary bounds and ID order. All per-worker bitsets and DP arrays are allocated
+before search; destination operations must not allocate. Build
 cliques only after the cheap root/seed checks. Bound clique refinement to
-100,000 extensions and keep at most 32 valid clique witnesses; never require
+100,000 extensions, a 64-million-word candidate ranking budget, and 64 greedy
+starts; keep at most 32 valid clique witnesses; never require
 an unbounded maximum-clique preprocessing search. The order anchors a large
 clique first, then favors neighbors of the chosen prefix, degree, spill cost,
-and ID. Canonical register naming follows this search order.
+and ID. Above 64 million adaptive-order comparisons, sort the remaining nodes
+once. Canonical register naming follows this search order.
 
 For each clique's unassigned nodes, the union of allowed register masks bounds
 how many can avoid spilling. Enforce its necessary spill count with a DP that
@@ -328,11 +356,28 @@ All feasible matrices in the verified shape contribute zero. Use the original
 shared evaluator for reported costs. Double-valued clique ranking is a heuristic
 for preparation only and must never supply a pruning bound.
 
+Complete independent-set enumeration has a 16 MiB auxiliary-storage budget,
+10,000-set limit, and eight-million-word work budget. Incomplete sets cannot
+bound register capacity and must be discarded. Weighted pricing applies only
+to finite nonnegative spills, with at most 2,000 iterations and bounded vertex
+visits. The auxiliary integer total is at most 32,768, with a four-million-slot
+DP scan budget. Check conversion and weight sums before allocating. Unsupported
+pricing falls back to unweighted capacity/clique bounds, never an error or an
+infeasibility claim. Build final workspaces after all pricing preparation.
+
 Private tests enumerate every canonical prefix and all original-order completions
 on small regalloc graphs with signed, INF, fractional, cancellation, subnormal,
 and extreme costs. Check lower bounds and infeasibility against the independent
-evaluator, validate every stored clique, and cover 63/64/65 node/register limits.
-Keep these tests independent of the DP, and retain failing input dumps. Extend
+evaluator, validate every stored clique, and cover node/register counts across
+64/128-bit storage boundaries, including conflicts in high register words.
+Keep these tests independent of the DP, and retain failing input dumps.
+Check generic independent sets against subset enumeration, incomplete-list
+fallback, finite-positive weighted prefix bounds, auxiliary-weight scaling,
+and reachable overflowed costs. Test actual sibling donation with exact progress,
+compressed forced prefixes, and dispatcher cancellation with a waiting consumer.
+Keep bitset equality distinct from intersection; test several unsigned Word
+widths, reject bool/signed/cv-qualified words, and avoid duplicate single-word
+paths or bitwise shifts of promoted negative narrow integers. Extend
 public oracle, parallel callback, ownership, C ABI, and CLI cases for `bnbopt`.
 
 The reduction heuristic clones the problem and prefers R0/R1/R2 by node ID.
@@ -384,6 +429,18 @@ accepting either named-option spelling; default 1. The C options entry point is
 `pbqp_solve_branch_and_bound_with_options`; NULL options select one thread and
 no callback, and zero threads is invalid. All options-based exact solvers use
 `pbqp_solve_options`. Legacy exact entry points use one thread.
+
+`--verbose` is a valueless flag for all solvers. Send basic solver/parameter/
+problem/quality information to stderr, preserving solution stdout. Bnbopt uses
+`pbqp_solve_branch_and_bound_optimized_with_diagnostics` to report cached input
+eligibility, resource limits, component fallbacks, early proofs, and real planning
+parameters. Keep the existing `pbqp_solve_options` layout; diagnostic and progress
+callbacks have independent contexts. Diagnostics run on the calling thread during
+preparation, not in DFS. Record generic status metadata in algorithms and format
+it separately in `bnbopt_diagnostics.cppm`; do not duplicate eligibility tests in
+CLI code or couple `IndependentSets` to PBQP reporting. Discarded partial
+independent sets must never appear as usable capacity. Add CLI/default-output,
+C-callback, coalescing, and budget-fallback coverage for diagnostic changes.
 
 `--heartbeat` is a valueless flag for `naive`, `bnb`, and `bnbopt`. It writes one flushed dot to
 stderr for each completed integer percentage, from 1 through 100, followed by
@@ -532,7 +589,7 @@ comparing revisions. The system `libbenchmark-dev` package is sufficient.
 cmake -S . -B build-clang-modules -DPBQP_BUILD_BENCHMARKS=ON
 cmake --build build-clang-modules --target pbqp_benchmark_reduction
 ./build-clang-modules/pbqp_benchmark_reduction --benchmark_repetitions=3 \
-  --benchmark_out=/tmp/pbqp-reduction.json --benchmark_out_format=json
+  --benchmark_out=build-clang-modules/pbqp-reduction.json --benchmark_out_format=json
 ```
 
 `Reduction/Star` and `Reduction/K4` cover 8k, 16k, 32k, and 64k nodes.
@@ -552,6 +609,8 @@ enabled and disabled, covering progress contention. Both use `UseRealTime`, so
 worker CPU time is not mistaken for elapsed solve time. Parsing and an optimum
 and assignment check are untimed. Optimized cases `BranchAndBoundOpt/Example06`, `/Example07`, and `/Example08`
 compare baseline/optimized behavior on the original, unpermuted fixtures.
+Example 09 adds 1/4/16-thread and heartbeat cases with known optimum
+338.854034; do not run baseline exact solvers on it in routine tests.
 Example 08's known optimum is 161.241684; it is a benchmark, not a full baseline
 exact-search CTest. The benchmark heartbeat uses a no-op callback
 to measure progress accounting without terminal I/O. Run:
@@ -559,7 +618,7 @@ to measure progress accounting without terminal I/O. Run:
 ```sh
 cmake --build build-clang-modules --target pbqp_benchmark_bnb
 ./build-clang-modules/pbqp_benchmark_bnb --benchmark_repetitions=3 \
-  --benchmark_out=/tmp/pbqp-bnb.json --benchmark_out_format=json
+  --benchmark_out=build-clang-modules/pbqp-bnb.json --benchmark_out_format=json
 ```
 
 `pbqp_benchmark_naive` compares 1/2/4/8 threads on a fixed binary 20-node
@@ -612,7 +671,7 @@ existing oneTBB source checkout; it never downloads a scheduler automatically:
 
 ```sh
 cmake -DPBQP_TBB_SOURCE=/path/to/oneTBB \
-  -DPBQP_TSAN_ROOT=/tmp/pbqp-tsan -P cmake/RunTSan.cmake
+  -DPBQP_TSAN_ROOT=build-clang-modules-tsan -P cmake/RunTSan.cmake
 ```
 
 It configures separate Debug builds with Clang 21, installs the instrumented

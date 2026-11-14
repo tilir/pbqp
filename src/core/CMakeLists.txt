@@ -3,6 +3,8 @@
 # See LICENSE for the full license text.
 
 set(PBQP_COMPONENT_MODULES
+  bitset.cppm
+  independent_sets.cppm
   failure.cppm
   ownership.cppm
   problem.cppm

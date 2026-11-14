@@ -22,7 +22,7 @@ import pbqp.command_line;
 import pbqp.generator;
 
 namespace {
-template <class T> T number(std::string_view name, std::string_view value) {
+template <typename T> T number(std::string_view name, std::string_view value) {
   T result{};
   auto parsed =
       std::from_chars(value.data(), value.data() + value.size(), result);

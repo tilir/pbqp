@@ -18,13 +18,13 @@ List available solvers, solve a problem, or generate a random instance:
 ```sh
 ./build/pbqp --help
 ./build/pbqp --solve=naive --numthreads=4 examples/01_basic.pbqp
-./build/pbqp --solve=bnbopt --numthreads=4 --heartbeat \
-  examples/08_too_long_for_simple_bnb.pbqp
+./build/pbqp --solve=bnbopt --numthreads=4 --heartbeat --verbose \
+  examples/09_more_bnbopts.pbqp
 ./build/pbqp --solve=greedy examples/07_parallel_exact_beats_heuristics.pbqp
 ./build/pbqp --solve=r1r2rn examples/07_parallel_exact_beats_heuristics.pbqp
 ./build/pbqp_generate --mode=regalloc --nodes=1000 --edges=3000 \
-  --registers=16 --seed=42 --output=/tmp/regalloc.pbqp
-./build/pbqp --solve=greedy /tmp/regalloc.pbqp
+  --registers=16 --seed=42 --output=build/regalloc.pbqp
+./build/pbqp --solve=greedy build/regalloc.pbqp
 ```
 
 Exact solvers default to one thread; `--numthreads=N` sets their TBB concurrency limit.

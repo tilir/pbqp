@@ -218,6 +218,14 @@ pbqp_status pbqp_solve_bruteforce(const pbqp_problem *problem,
  * or its arrays. */
 typedef void (*pbqp_progress_callback)(unsigned percent, void *user_data);
 
+/* Optional human-readable preparation diagnostics. Each message is a borrowed
+ * NUL-terminated string valid only during the callback, without a newline.
+ * Calls are synchronous on the calling thread, outside DFS, and may precede
+ * success or failure. The callback must not throw, modify the problem, or
+ * retain the message pointer. Text is diagnostic, not a stable machine format.
+ */
+typedef void (*pbqp_diagnostic_callback)(const char *message, void *user_data);
+
 /* Initialize all fields, e.g. {1, NULL, NULL}. num_threads must be positive
  * and fit in int, the oneTBB arena's concurrency type. The limit includes the
  * calling thread. Task count or available TBB resources may reduce concurrency.
@@ -286,11 +294,13 @@ pbqp_status pbqp_solve_branch_and_bound_with_options(
 
 /* Optimized exact B&B with the same validation, ownership, result quality,
  * reference-order evaluation, and diagnostic contracts as ordinary B&B.
- * Verified small uniform regalloc inputs use structural clique-first traversal,
- * bit-mask forward checking, and clique spill-count bounds. Other inputs use
- * the ordinary bounds. Traversal order never changes summation order. Returns
- * any optimum; tied assignments may depend on scheduling. This entry point
- * uses one thread. No external mathematical-programming library is required. */
+ * Verified uniform regalloc inputs within preparation resource budgets use
+ * structural clique-first traversal, dynamic-bitset forward checking, and
+ * clique and global register-capacity bounds with bounded auxiliary pricing.
+ * Unsupported inputs retain ordinary or unweighted bounds. Traversal
+ * order never changes summation order. Returns any optimum; tied assignments
+ * may depend on scheduling. This entry point uses one thread. No external
+ * mathematical-programming library is required. */
 pbqp_status pbqp_solve_branch_and_bound_optimized(const pbqp_problem *problem,
                                                   pbqp_solution **out,
                                                   pbqp_error *error);
@@ -306,6 +316,16 @@ pbqp_status pbqp_solve_branch_and_bound_optimized_with_progress(
  * All work, including callbacks, completes before this call returns. */
 pbqp_status pbqp_solve_branch_and_bound_optimized_with_options(
     const pbqp_problem *problem, const pbqp_solve_options *options,
+    pbqp_solution **out, pbqp_error *error);
+
+/* Same contract as optimized_with_options, with optional preparation messages
+ * explaining input eligibility, enabled optimizations, preparation limits,
+ * fallbacks, and worker/planning parameters. NULL diagnostics disables
+ * messages. diagnostic_data is independent of options->user_data (the progress
+ * context). */
+pbqp_status pbqp_solve_branch_and_bound_optimized_with_diagnostics(
+    const pbqp_problem *problem, const pbqp_solve_options *options,
+    pbqp_diagnostic_callback diagnostics, void *diagnostic_data,
     pbqp_solution **out, pbqp_error *error);
 
 /* Validates and borrows inputs with the same ownership rules as brute force.

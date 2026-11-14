@@ -6,6 +6,7 @@ set(PBQP_COMPONENT_MODULES
   branch_and_bound.cppm
   bnb_bounds.cppm
   bnb_incumbent.cppm
+  bnb_work_queue.cppm
   bnb_tasks.cppm
   bnb_worker.cppm
 )
