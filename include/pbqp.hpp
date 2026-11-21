@@ -1,5 +1,5 @@
 /*
- * C++23 conveniences over C API 2.4: RAII problems, vector solutions, spans,
+ * C++23 conveniences over C API 2.5: RAII problems, vector solutions, spans,
  * typed solver selection, callbacks, and exceptions preserving C diagnostics.
  * This header does not expose implementation modules or solver internals.
  *
@@ -8,7 +8,7 @@
  */
 #pragma once
 /** @file pbqp.hpp
- * @brief Public C++23 wrapper over C API 2.4.
+ * @brief Public C++23 wrapper over C API 2.5.
  */
 #include "pbqp.h"
 #include <cstddef>
@@ -35,7 +35,9 @@ enum class Solver {
   BranchAndBound = PBQP_SOLVER_BNB, ///< Exact B&B.
   Greedy = PBQP_SOLVER_GREEDY,      ///< Greedy heuristic.
   Reduction = PBQP_SOLVER_R1R2RN,   ///< R1/R2/RN heuristic.
-  Dsatur = PBQP_SOLVER_DSATUR       ///< DSATUR/tabu with greedy fallback.
+  Dsatur = PBQP_SOLVER_DSATUR,      ///< DSATUR/tabu with greedy fallback.
+  Bucket =
+      PBQP_SOLVER_BUCKET ///< Bucket elimination with float-order certification.
 };
 
 /** Feasibility or optimality guarantee, matching pbqp_solution_quality. */

@@ -74,12 +74,14 @@ public:
   }
 
   void completed_prefix(const size_t *tuple, size_t depth) noexcept {
+    const auto first = next_percent;
     while (next_percent <= 100 && reached(tuple, depth)) {
-      callback(next_percent, user_data);
       ++next_percent;
       if (next_percent <= 100)
         prepare_boundary();
     }
+    if (next_percent != first)
+      callback(next_percent - 1, user_data);
   }
 };
 } // namespace pbqp

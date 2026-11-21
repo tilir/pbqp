@@ -42,6 +42,8 @@ public:
 
   const pbqp_solution &get_solution() const noexcept { return *solution; }
 
+  const pbqp_solution &result() const noexcept { return *solution; }
+
   pbqp_solution *release_solution() noexcept { return solution.release(); }
 };
 

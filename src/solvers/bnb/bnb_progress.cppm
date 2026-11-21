@@ -23,11 +23,13 @@ class BranchAndBoundProgress {
   void *user_data;
   std::mutex mutex;
   double completed = 0, discarded = 0;
-  unsigned next_percent = 1;
+  unsigned reported_percent = 0;
 
   void report(unsigned percent) noexcept {
-    while (next_percent <= percent)
-      callback(next_percent++, user_data);
+    if (percent <= reported_percent)
+      return;
+    reported_percent = percent;
+    callback(percent, user_data);
   }
 
   void merge(double work, double skipped) noexcept {

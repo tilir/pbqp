@@ -1347,7 +1347,7 @@ void test_progress() {
       if (forbidden && !costs.empty())
         std::fill(costs.back().begin(), costs.back().end(), PBQP_INF);
       for (auto solve : {pbqp_solve_bruteforce, pbqp_solve_branch_and_bound,
-                         pbqp_test::solve_profile<2>}) {
+                         pbqp_test::solve_profile<2>, pbqp_solve_bucket}) {
         ProgressLog log;
         pbqp_solution *progress = nullptr, *plain = nullptr;
         pbqp_option config_entries[] = {
@@ -1359,9 +1359,19 @@ void test_progress() {
         const pbqp_solve_options config{5, config_entries};
         auto status = solve(&p, &config, &progress, nullptr);
         check(status == pbqp_solve_bruteforce(&p, nullptr, &plain, nullptr));
-        check(log.count == 100);
-        for (unsigned i = 0; i < 100; ++i)
-          check(log.percentages[i] == i + 1);
+        check(log.count > 0 && log.count <= 100);
+        check(log.percentages[0] > 0 && log.percentages[log.count - 1] == 100);
+        for (unsigned i = 1; i < log.count; ++i)
+          check(log.percentages[i - 1] < log.percentages[i]);
+        if (solve == pbqp_solve_bruteforce) {
+          size_t tuples = 1;
+          for (size_t domain : dimensions)
+            tuples *= domain;
+          check(log.count == std::min(tuples, size_t{100}));
+          if (tuples < 100)
+            for (size_t k = 0; k < tuples; ++k)
+              check(log.percentages[k] == 100 * (k + 1) / tuples);
+        }
         if (plain) {
           check(progress && progress->cost == plain->cost &&
                 progress->quality == plain->quality);
@@ -1397,6 +1407,85 @@ void test_progress() {
     pbqp_solution_free(solution);
   }
 }
+
+void test_bucket() {
+  constexpr size_t count = 4, domain = 16;
+  const pbqp_cost_t unary[domain] = {2, -3, 4, 1};
+  pbqp_cost_t matrix[domain * domain];
+  for (size_t i = 0; i < domain; ++i)
+    for (size_t j = 0; j < domain; ++j)
+      matrix[i * domain + j] =
+          i == j ? PBQP_INF : static_cast<pbqp_cost_t>((i + 2 * j) % 5) - 2;
+  const std::vector<pbqp_node> nodes(count, {domain, unary});
+  const pbqp_edge edges[] = {{0, 1, matrix}, {0, 2, matrix}, {0, 3, matrix},
+                             {1, 2, matrix}, {1, 3, matrix}, {2, 3, matrix}};
+  const pbqp_problem problem{count, std::size(edges), nodes.data(), edges};
+  pbqp_solution *reference = nullptr;
+  check(pbqp_solve_bruteforce(&problem, nullptr, &reference, nullptr) ==
+        PBQP_OK);
+  const pbqp_option entries[] = {pbqp_size_option("num-threads", 4)};
+  const pbqp_solve_options options{std::size(entries), entries};
+  pbqp_solution *solution = nullptr;
+  check(pbqp_solve_bucket(&problem, &options, &solution, nullptr) == PBQP_OK);
+  pbqp_evaluation evaluation{};
+  check(pbqp_evaluate_assignment(&problem, solution->options, count,
+                                 &evaluation, nullptr) == PBQP_OK);
+  check(evaluation.is_feasible && evaluation.cost == reference->cost &&
+        solution->cost == reference->cost &&
+        solution->quality == PBQP_SOLUTION_OPTIMAL);
+  pbqp_solution_free(solution);
+  pbqp_solution_free(reference);
+  const auto zero_budget = pbqp_size_option("bucket-max-entries", 0);
+  const pbqp_solve_options tiny_budget{1, &zero_budget};
+  check(pbqp_solve_bucket(&problem, &tiny_budget, &solution, nullptr) ==
+        PBQP_NO_SOLUTION);
+  check(!solution);
+
+  // Eliminating a locally cheaper option before the leading huge unary can
+  // change the optimum when the following addition rounds the difference away.
+  const pbqp_cost_t leading[] = {16777216}, trailing[] = {-16777216};
+  const pbqp_cost_t choice[] = {0, 1};
+  const pbqp_cost_t interaction[] = {0, -0.5f};
+  const pbqp_node rounding_nodes[] = {{1, leading}, {2, choice}, {1, trailing}};
+  const pbqp_edge rounding_edge{1, 2, interaction};
+  const pbqp_problem rounding{3, 1, rounding_nodes, &rounding_edge};
+  check(pbqp_solve_bruteforce(&rounding, nullptr, &reference, nullptr) ==
+        PBQP_OK);
+  check(reference->options[1] == 1 && reference->cost == -0.5f);
+  pbqp_solution_free(reference);
+  check(pbqp_solve_bucket(&rounding, nullptr, &solution, nullptr) == PBQP_OK);
+  check(solution->options[1] == 0 && solution->cost == 0 &&
+        solution->quality == PBQP_SOLUTION_FEASIBLE);
+  pbqp_solution_free(solution);
+  const auto strict = pbqp_bool_option("warnings-as-errors", true);
+  const pbqp_solve_options strict_options{1, &strict};
+  pbqp_error error;
+  check(pbqp_solve_bucket(&rounding, &strict_options, &solution, &error) ==
+        PBQP_INVALID);
+  check(!solution && std::string_view(error.message).find("float optimum") !=
+                         std::string_view::npos);
+
+  // Reconstruct option indices across both compact-storage boundaries.
+  for (const size_t domain : {size_t{256}, size_t{257}, size_t{65537}}) {
+    std::vector<pbqp_cost_t> unary(domain);
+    unary.back() = -1;
+    const pbqp_node node{domain, unary.data()};
+    const pbqp_problem single{1, 0, &node, nullptr};
+    check(pbqp_solve_bucket(&single, nullptr, &solution, nullptr) == PBQP_OK);
+    check(solution->options[0] == domain - 1 && solution->cost == -1);
+    pbqp_solution_free(solution);
+  }
+
+  // Overflowed reference cost remains feasible.
+  const pbqp_cost_t large[] = {std::numeric_limits<pbqp_cost_t>::max()};
+  const pbqp_node large_nodes[] = {{1, large}, {1, large}};
+  const pbqp_problem overflow{std::size(large_nodes), 0, large_nodes, nullptr};
+  check(pbqp_solve_bucket(&overflow, nullptr, &solution, nullptr) == PBQP_OK);
+  check(solution->cost == PBQP_INF &&
+        solution->quality == PBQP_SOLUTION_FEASIBLE);
+  pbqp_solution_free(solution);
+}
+
 } // namespace
 
 int main() {
@@ -1407,6 +1496,7 @@ int main() {
     test_algebra();
     test_examples();
     test_solver();
+    test_bucket();
     test_invalid();
     test_error_contract();
     test_float_validation();

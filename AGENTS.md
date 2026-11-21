@@ -225,7 +225,7 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
 ## Exact-solver deadlines
 
 API 2.2 adds `PBQP_TIMEOUT` without changing existing enum values or layouts.
-The SIZE key `timeout-ms` applies to naive and all B&B profiles; zero/omitted
+The SIZE key `timeout-ms` applies to naive, bucket elimination, and all B&B profiles; zero/omitted
 means unlimited. Start a monotonic budget before validation/preparation, include
 callbacks and all workers, and stop cooperatively between preparation steps and
 short search batches. Never use timer threads, asynchronous exceptions, or

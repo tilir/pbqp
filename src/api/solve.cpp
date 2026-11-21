@@ -20,6 +20,8 @@ extern "C" pbqp_status pbqp_solve(pbqp_solver solver,
     return pbqp_solve_bruteforce(problem, options, out, error);
   case PBQP_SOLVER_BNB:
     return pbqp_solve_branch_and_bound(problem, options, out, error);
+  case PBQP_SOLVER_BUCKET:
+    return pbqp_solve_bucket(problem, options, out, error);
   case PBQP_SOLVER_DSATUR:
     return pbqp_solve_dsatur(problem, options, out, error);
   case PBQP_SOLVER_GREEDY:

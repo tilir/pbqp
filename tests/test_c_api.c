@@ -11,15 +11,15 @@
 #include "pbqp.h"
 
 typedef struct progress_log {
-  unsigned count;
+  unsigned latest;
   int invalid;
 } progress_log;
 
 static void record_progress(unsigned percent, void *data) {
   progress_log *log = (progress_log *)data;
-  if (percent != log->count + 1 || percent > 100)
+  if (percent <= log->latest || percent > 100)
     log->invalid = 1;
-  ++log->count;
+  log->latest = percent;
 }
 
 typedef struct diagnostic_log {
@@ -48,7 +48,8 @@ static int test_dispatch(const pbqp_problem *problem) {
                  {PBQP_SOLVER_BNB, pbqp_solve_branch_and_bound, 1},
                  {PBQP_SOLVER_GREEDY, pbqp_solve_greedy, 0},
                  {PBQP_SOLVER_R1R2RN, pbqp_solve_reduction, 0},
-                 {PBQP_SOLVER_DSATUR, pbqp_solve_dsatur, 0}};
+                 {PBQP_SOLVER_DSATUR, pbqp_solve_dsatur, 0},
+                 {PBQP_SOLVER_BUCKET, pbqp_solve_bucket, 1}};
 
   size_t i;
   for (i = 0; i < sizeof(solvers) / sizeof(solvers[0]); ++i) {
@@ -73,36 +74,36 @@ static int test_dispatch(const pbqp_problem *problem) {
         quality != (solvers[i].exact ? PBQP_SOLUTION_OPTIMAL
                                      : PBQP_SOLUTION_FEASIBLE) ||
         diagnostics.count == 0 || diagnostics.invalid || progress.invalid ||
-        progress.count != (solvers[i].exact ? 100u : 0u) || error.line ||
+        progress.latest != (solvers[i].exact ? 100u : 0u) || error.line ||
         error.message[0])
       return 0;
-    progress.count = diagnostics.count = 0;
+    progress.latest = diagnostics.count = 0;
     if (pbqp_solve(solvers[i].kind, problem, &options, &dispatched, &error) !=
         PBQP_OK)
       return 0;
     int matches = dispatched->cost == cost && dispatched->quality == quality;
     pbqp_solution_free(dispatched);
     if (!matches || diagnostics.count == 0 || diagnostics.invalid ||
-        progress.invalid || progress.count != (solvers[i].exact ? 100u : 0u))
+        progress.invalid || progress.latest != (solvers[i].exact ? 100u : 0u))
       return 0;
     if (pbqp_solve(solvers[i].kind, problem, NULL, &dispatched, NULL) !=
         PBQP_OK)
       return 0;
     pbqp_solution_free(dispatched);
-    progress.count = diagnostics.count = 0;
+    progress.latest = diagnostics.count = 0;
     options_entries[0].value.size = 0;
     if (pbqp_solve(solvers[i].kind, problem, &options, &dispatched, &error) !=
             PBQP_INVALID ||
-        dispatched || progress.count || diagnostics.count || !error.message[0])
+        dispatched || progress.latest || diagnostics.count || !error.message[0])
       return 0;
     options_entries[0].value.size = 1;
     if (pbqp_solve(solvers[i].kind, NULL, &options, &dispatched, &error) !=
             PBQP_INVALID ||
-        dispatched || progress.count || diagnostics.count)
+        dispatched || progress.latest || diagnostics.count)
       return 0;
     if (pbqp_solve(solvers[i].kind, problem, &options, NULL, &error) !=
             PBQP_INVALID ||
-        progress.count || diagnostics.count)
+        progress.latest || diagnostics.count)
       return 0;
     if (!solvers[i].exact) {
       options_entries[1].value.progress = record_progress;
@@ -114,7 +115,7 @@ static int test_dispatch(const pbqp_problem *problem) {
       const pbqp_solve_options strict = {6, strict_entries};
       if (solvers[i].solve(problem, &strict, &dispatched, &error) !=
               PBQP_INVALID ||
-          dispatched || progress.count || diagnostics.count ||
+          dispatched || progress.latest || diagnostics.count ||
           !error.message[0])
         return 0;
     }
@@ -134,7 +135,7 @@ static int test_dispatch(const pbqp_problem *problem) {
     pbqp_error error;
     if (pbqp_solve((pbqp_solver)255, problem, &options, &solution, &error) !=
             PBQP_INVALID ||
-        solution || !error.message[0] || error.line || progress.count ||
+        solution || !error.message[0] || error.line || progress.latest ||
         diagnostics.count)
       return 0;
     if (pbqp_solve((pbqp_solver)-1, problem, NULL, NULL, NULL) != PBQP_INVALID)
@@ -308,13 +309,13 @@ static int test_unsupported_heuristic_options(void) {
     if (solvers[index](&empty, &options, &solution, &error) != PBQP_OK ||
         !solution || solution->quality != PBQP_SOLUTION_FEASIBLE ||
         warnings.count != 2 || warnings.invalid || !diagnostics.count ||
-        progress.count || error.message[0])
+        progress.latest || error.message[0])
       return 0;
     pbqp_solution_free(solution);
     warnings.count = diagnostics.count = 0;
     entries[7] = pbqp_bool_option("warnings-as-errors", 1);
     if (solvers[index](&empty, &options, &solution, &error) != PBQP_INVALID ||
-        solution || warnings.count || diagnostics.count || progress.count ||
+        solution || warnings.count || diagnostics.count || progress.latest ||
         !error.message[0])
       return 0;
     entries[0] = pbqp_size_option("num-threads", 1);
@@ -322,7 +323,7 @@ static int test_unsupported_heuristic_options(void) {
     entries[7] = pbqp_bool_option("warnings-as-errors", 0);
     entries[2] = pbqp_bool_option("unrecognized", 1);
     if (solvers[index](&empty, &options, &solution, NULL) != PBQP_OK ||
-        !solution || warnings.count != 1 || progress.count)
+        !solution || warnings.count != 1 || progress.latest)
       return 0;
     pbqp_solution_free(solution);
   }
@@ -339,7 +340,7 @@ int main(void) {
   if (version.major != PBQP_API_VERSION_MAJOR ||
       version.minor != PBQP_API_VERSION_MINOR ||
       version.patch != PBQP_API_VERSION_PATCH || version.major != 2 ||
-      version.minor != 4 || version.patch != 0)
+      version.minor != 5 || version.patch != 0)
     return 1;
   pbqp_cost_t costs[] = {4, -2};
   pbqp_node node = {2, costs};
@@ -388,7 +389,7 @@ int main(void) {
     const pbqp_solve_options options = {5, options_entries};
     if (pbqp_solve_bruteforce(&problem, &options, &solution, NULL) != PBQP_OK)
       return 1;
-    ok = ok && log.count == 100 && !log.invalid && solution->cost == -2;
+    ok = ok && log.latest == 100 && !log.invalid && solution->cost == -2;
     pbqp_solution_free(solution);
   }
   {
@@ -403,7 +404,7 @@ int main(void) {
     if (pbqp_solve_branch_and_bound(&problem, &options, &solution, NULL) !=
         PBQP_OK)
       return 1;
-    ok = ok && log.count == 100 && !log.invalid && solution->cost == -2;
+    ok = ok && log.latest == 100 && !log.invalid && solution->cost == -2;
     pbqp_solution_free(solution);
   }
   {
@@ -419,14 +420,14 @@ int main(void) {
         PBQP_OK)
       return 1;
     ok = ok && solution->quality == PBQP_SOLUTION_OPTIMAL &&
-         solution->cost == -2 && log.count == 100 && !log.invalid;
+         solution->cost == -2 && log.latest == 100 && !log.invalid;
     pbqp_solution_free(solution);
-    log.count = 0;
+    log.latest = 0;
     log.invalid = 0;
     if (pbqp_solve_bruteforce(&problem, &options, &solution, NULL) != PBQP_OK)
       return 1;
     ok = ok && solution->cost == -2 && solution->options[0] == 1 &&
-         log.count == 100 && !log.invalid;
+         log.latest == 100 && !log.invalid;
     pbqp_solution_free(solution);
     options_entries[0].value.size = 0;
     if (pbqp_solve_branch_and_bound(&problem, &options, &solution, NULL) !=
@@ -450,14 +451,14 @@ int main(void) {
     if (pbqp_solve_branch_and_bound(&problem, &options, &solution, NULL) !=
         PBQP_OK)
       return 1;
-    ok = ok && solution->cost == -2 && log.count == 100 && !log.invalid;
+    ok = ok && solution->cost == -2 && log.latest == 100 && !log.invalid;
     pbqp_solution_free(solution);
-    log.count = 0;
+    log.latest = 0;
     options_entries[0].value.size = 1;
     if (pbqp_solve_branch_and_bound(&problem, &options, &solution, NULL) !=
         PBQP_OK)
       return 1;
-    ok = ok && log.count == 100 && !log.invalid;
+    ok = ok && log.latest == 100 && !log.invalid;
     pbqp_solution_free(solution);
   }
   {
@@ -486,7 +487,7 @@ int main(void) {
     if (pbqp_solve_branch_and_bound(&problem, &options, &solution, NULL) !=
         PBQP_OK)
       return 1;
-    ok = ok && solution->cost == -2 && progress.count == 100 &&
+    ok = ok && solution->cost == -2 && progress.latest == 100 &&
          !progress.invalid && diagnostics.count > 0 && !diagnostics.invalid;
     pbqp_solution_free(solution);
     diagnostics.count = 0;

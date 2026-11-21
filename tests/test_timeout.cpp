@@ -52,7 +52,9 @@ void test_timeout(pbqp_solver solver, size_t profile, size_t threads, bool seed,
   // requires far more work than the small budget on ordinary test machines.
   const pbqp_cost_t unary[] = {0, 0};
   const pbqp_cost_t matrix[] = {1, 0, 0, 1};
-  std::vector<pbqp_node> nodes(45, pbqp_node{2, unary});
+  // Keep the bucket diagnostics test within the dense-table budget.
+  const size_t count = solver == PBQP_SOLVER_BUCKET && delay ? 4 : 45;
+  std::vector<pbqp_node> nodes(count, pbqp_node{2, unary});
   std::vector<pbqp_edge> edges;
   for (size_t src = 0; src < nodes.size(); ++src)
     for (size_t tgt = src + 1; tgt < nodes.size(); ++tgt)
@@ -165,7 +167,8 @@ int main() {
         test_timeout(PBQP_SOLVER_BNB, profile, threads, false, false);
       }
     }
-    for (auto solver : {PBQP_SOLVER_NAIVE, PBQP_SOLVER_BNB}) {
+    for (auto solver :
+         {PBQP_SOLVER_NAIVE, PBQP_SOLVER_BNB, PBQP_SOLVER_BUCKET}) {
       test_timeout(solver, 2, 4, false, true);
       test_options(solver);
     }

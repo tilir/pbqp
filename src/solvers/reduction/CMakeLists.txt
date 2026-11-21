@@ -6,6 +6,7 @@ set(PBQP_COMPONENT_MODULES
   reduction.cppm
   reduction_graph.cppm
   reduction_worklist.cppm
+  reduction_refine.cppm
 )
 list(TRANSFORM PBQP_COMPONENT_MODULES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 list(APPEND PBQP_LIBRARY_MODULES ${PBQP_COMPONENT_MODULES})

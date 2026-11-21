@@ -54,6 +54,7 @@ void help() {
          "                 Defaults: bnb=O1, bnbopt=O2.\n"
          "  -fNAME / -fno-NAME  Override a B&B optimization after the "
          "profile.\n\n"
+         "  -fbucket-width=N  Refine r1r2rn at induced width N (N > 2).\n\n"
          "  -Werror  Treat unrecognized-option warnings as errors.\n\n"
          "Solvers:\n"
          "  naive   Exhaustive search; proves optimality or infeasibility.\n"
@@ -61,6 +62,7 @@ void help() {
          "subtrees.\n"
          "  bnbopt  Exact B&B with the O2 optimization profile by default.\n"
          "  dsatur  DSATUR/tabu heuristic with greedy fallback.\n"
+         "  bucket  Bucket elimination with float-order certification.\n"
          "  r1r2rn  R1/R2/RN reduction and backpropagation heuristic.\n"
          "  greedy  Cost-priority heuristic; returns a feasible, possibly "
          "suboptimal solution.\n\n"
@@ -70,9 +72,14 @@ void help() {
 }
 
 void heartbeat(unsigned percent, void *data) noexcept {
-  auto &pending = *static_cast<bool *>(data);
-  pending = percent != 100;
-  std::cerr.put('.');
+  static constexpr auto dots = [] {
+    std::array<char, 100> result{};
+    result.fill('.');
+    return result;
+  }();
+  auto &reported = *static_cast<unsigned *>(data);
+  std::cerr.write(dots.data(), percent - reported);
+  reported = percent;
   if (percent == 100)
     std::cerr.put('\n');
   std::cerr.flush();
@@ -101,6 +108,8 @@ std::optional<pbqp_solver> solver_kind(std::string_view name) {
     return PBQP_SOLVER_BNB;
   if (name == "bnbopt")
     return PBQP_SOLVER_BNB;
+  if (name == "bucket")
+    return PBQP_SOLVER_BUCKET;
   if (name == "dsatur")
     return PBQP_SOLVER_DSATUR;
   if (name == "greedy")
@@ -143,7 +152,7 @@ size_t timeout_milliseconds(std::string_view text) {
 std::optional<SolverOptions> parse_options(int argc, char **argv) {
   try {
     constexpr std::string_view names[] = {"--solve", "--numthreads",
-                                          "--timeout"};
+                                          "--timeout", "-fbucket-width"};
     std::vector<std::string> spellings;
     for (auto name : optimization_names) {
       spellings.push_back("-f" + std::string(name));
@@ -200,6 +209,16 @@ std::optional<SolverOptions> parse_options(int argc, char **argv) {
         result.entries.push_back(
             pbqp_bool_option(optimization_names[id].data(), enable > disable));
     }
+    if (arguments.has("-fbucket-width")) {
+      const auto value = arguments.require("-fbucket-width");
+      size_t width = 0;
+      const auto parsed =
+          std::from_chars(value.data(), value.data() + value.size(), width);
+      if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
+        throw std::invalid_argument(
+            "-fbucket-width requires a nonnegative integer");
+      result.entries.push_back(pbqp_size_option("bucket-width", width));
+    }
     if (arguments.has("--timeout"))
       result.entries.push_back(pbqp_size_option(
           "timeout-ms", timeout_milliseconds(arguments.require("--timeout"))));
@@ -252,15 +271,15 @@ pbqp_status read_problem(std::string_view path, ProblemPtr &problem,
 pbqp_status solve_problem(SolverOptions &options, const pbqp_problem &problem,
                           SolutionPtr &solution, pbqp_error &error) {
   pbqp_solution *raw = nullptr;
-  bool pending_heartbeat = false;
+  unsigned reported_percent = 0;
   for (auto &entry : options.entries)
     if (std::string_view(entry.key) == "progress-data")
-      entry.value.pointer = &pending_heartbeat;
+      entry.value.pointer = &reported_percent;
   const pbqp_solve_options config{options.entries.size(),
                                   options.entries.data()};
   auto status = pbqp_solve(options.algorithm, &problem, &config, &raw, &error);
   solution.reset(raw);
-  if (pending_heartbeat)
+  if (reported_percent && reported_percent < 100)
     std::cerr.put('\n');
   return status;
 }

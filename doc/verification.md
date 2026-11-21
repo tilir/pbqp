@@ -63,8 +63,8 @@ arrays and verify solution storage after destroying the input. Include RN
 regressions for neighbor feasibility and finite spill-priority changes.
 Large stars and subdivided stars vary center ID and edge storage order; disconnected K4s exercise
 repeated RN selection. Keep wall-clock thresholds out of ordinary CTest.
-Heartbeat tests cover the C callback, unchanged solver output, the complete
-1..100 notification sequence, empty and infeasible searches, and no early
+Heartbeat tests cover the C callback, unchanged solver output, strictly increasing
+percentages through 100 and the complete CLI dot sequence, empty and infeasible searches, and no early
 progress on a timed-out 2^65-tuple search. Do not run `05_too_long_for_naive.pbqp`'s complete
 2,176,782,336-tuple enumeration as a routine CTest entry.
 Preserve greedy-seed regressions for dead ends, suboptimal initial solutions,
@@ -73,7 +73,7 @@ Compare branch-and-bound with both naive and the independent oracle on all
 small generator families, including fractional spill costs and extreme float
 values. Preserve targeted negative-edge and cancellation regressions; a
 reassociated or partial-only bound must not discard a better solution.
-Check 100 callbacks on huge feasible and root-infeasible 2^65-tuple spaces
+Check the final 100 notification on huge feasible and root-infeasible 2^65-tuple spaces
 that branch-and-bound can close quickly.
 
 Google Benchmark scalability cases are optional and are not CTest entries.

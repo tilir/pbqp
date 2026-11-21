@@ -4,6 +4,7 @@
 
 add_subdirectory(naive)
 add_subdirectory(bnb)
+add_subdirectory(bucket)
 add_subdirectory(greedy)
 add_subdirectory(dsatur)
 add_subdirectory(reduction)

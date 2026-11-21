@@ -41,7 +41,7 @@ using SolutionPtr =
 
 struct Progress {
   std::atomic<bool> active{false};
-  std::atomic<unsigned> count{0};
+  std::atomic<unsigned> latest{0};
   std::atomic<bool> invalid{false};
 };
 
@@ -55,7 +55,7 @@ void report(unsigned percent, void *data) noexcept {
   auto &log = *static_cast<Progress *>(data);
   if (log.active.exchange(true))
     log.invalid = true;
-  if (percent != log.count.fetch_add(1) + 1 || percent > 100)
+  if (percent <= log.latest.exchange(percent) || percent > 100)
     log.invalid = true;
   log.active = false;
 }
@@ -79,7 +79,7 @@ void verify(const pbqp_problem &problem, size_t threads, bool naive = false,
                                   : pbqp_solve_branch_and_bound);
   auto status = solve(&problem, &options, &raw, &error);
   SolutionPtr solution(raw);
-  check(status == expected && !progress.invalid && progress.count == 100);
+  check(status == expected && !progress.invalid && progress.latest == 100);
   if (status != PBQP_OK) {
     check(!solution && status == PBQP_INFEASIBLE && error.message[0]);
     return;
@@ -208,7 +208,7 @@ void test_large_progress() {
         pbqp_solve_branch_and_bound(&problem, &options, &raw, nullptr);
     SolutionPtr solution(raw);
     check(status == (forbidden ? PBQP_INFEASIBLE : PBQP_OK));
-    check(progress.count == 100 && !progress.invalid);
+    check(progress.latest == 100 && !progress.invalid);
   }
   // Worker batches merge counts in a 2^65 space, including long carries. Eight
   // free prefix bits fan out jobs; unary constraints close huge suffixes. A
@@ -234,7 +234,7 @@ void test_large_progress() {
         PBQP_OK);
   SolutionPtr solution(raw);
   check(solution->cost == 1 && solution->quality == PBQP_SOLUTION_OPTIMAL);
-  check(progress.count == 100 && !progress.invalid);
+  check(progress.latest == 100 && !progress.invalid);
 }
 
 void test_progress_batches() {
@@ -352,7 +352,7 @@ void test_optimized_regalloc() {
                                  solution->num_nodes, &evaluation,
                                  nullptr) == PBQP_OK);
   check(evaluation.is_feasible && evaluation.cost == 4);
-  check(progress.count == 100 && !progress.invalid);
+  check(progress.latest == 100 && !progress.invalid);
 }
 
 void test_contract() {
@@ -383,7 +383,7 @@ void test_contract() {
       raw = solution.get();
       pbqp_error error;
       check(solve(&empty, &invalid, &raw, &error) == PBQP_INVALID);
-      check(!raw && error.message[0] && !error.line && progress.count == 0);
+      check(!raw && error.message[0] && !error.line && progress.latest == 0);
     }
     check(solve(nullptr, &options, &raw, nullptr) == PBQP_INVALID && !raw);
     check(solve(&empty, &options, nullptr, nullptr) == PBQP_INVALID);

@@ -37,12 +37,14 @@ void check(bool condition,
 }
 
 struct ProgressLog {
-  unsigned count = 0;
+  unsigned latest = 0, calls = 0;
   bool invalid = false;
 
   static void report(unsigned percent, void *data) noexcept {
     auto &log = *static_cast<ProgressLog *>(data);
-    log.invalid |= percent != ++log.count || percent > 100;
+    log.invalid |= percent <= log.latest || percent > 100;
+    log.latest = percent;
+    ++log.calls;
   }
 };
 
@@ -122,25 +124,25 @@ void test_filtered_children() {
         // no progress weight, even though they cover 98% of the tuple space.
         for (size_t step = 0; step < 99; ++step) {
           check(!worker.chunk(1, pending));
-          check(log.count == 0);
+          check(log.latest == 0);
         }
       }
       bool first = true;
       while (worker.active()) {
         worker.chunk(quota, pending);
-        if (quota == 1 && log.count && first) {
+        if (quota == 1 && log.latest && first) {
           // The first update is the completed root lookahead: one of
           // five levels including the leaves.
-          check(log.count == 20);
+          check(log.latest == 20);
           first = false;
         }
       }
       pending.flush();
-      check(log.count == 99 && !log.invalid);
+      check(log.latest == 99 && !log.invalid);
       check(bounds.checked_at_most_once());
       check(incumbent.result().cost == -2);
       progress.finish();
-      check(log.count == 100 && !log.invalid);
+      check(log.latest == 100 && !log.invalid);
     }
   }
 }
@@ -150,23 +152,23 @@ void test_progress_completion() {
   pbqp::BranchAndBoundProgress progress(ProgressLog::report, &log);
   pbqp::BranchAndBoundProgress::Accumulator pending(progress);
   pending.discarded(0.75);
-  check(log.count == 0);
+  check(log.latest == 0);
   pending.completed(0.125);
-  check(log.count == 50);
+  check(log.latest == 50);
   pending.completed(0.125);
-  check(log.count == 99);
+  check(log.latest == 99);
   progress.finish();
-  check(log.count == 100 && !log.invalid);
+  check(log.latest == 100 && !log.invalid);
   progress.finish();
-  check(log.count == 100 && !log.invalid);
+  check(log.latest == 100 && log.calls == 3 && !log.invalid);
 
   ProgressLog empty;
   pbqp::BranchAndBoundProgress closed(ProgressLog::report, &empty);
   pbqp::BranchAndBoundProgress::Accumulator rejected(closed);
   rejected.discarded(1);
-  check(empty.count == 0);
+  check(empty.latest == 0);
   closed.finish();
-  check(empty.count == 100 && !empty.invalid);
+  check(empty.latest == 100 && empty.calls == 1 && !empty.invalid);
 }
 
 struct RecordingProgress {
@@ -205,9 +207,9 @@ void test_empty_jobs() {
     }
     observer.pending.flush();
     check(observer.skipped == 1 && observer.work == 0);
-    check(log.count == 0);
+    check(log.latest == 0);
     progress.finish();
-    check(log.count == 100 && !log.invalid);
+    check(log.latest == 100 && !log.invalid);
   }
 }
 
@@ -230,9 +232,9 @@ void test_new_incumbent() {
   }
   observer.pending.flush();
   check(observer.skipped == 0.8 && observer.work == 0.2);
-  check(log.count == 99 && bounds.checked_at_most_once());
+  check(log.latest == 99 && bounds.checked_at_most_once());
   progress.finish();
-  check(log.count == 100 && !log.invalid);
+  check(log.latest == 100 && !log.invalid);
 }
 
 class CountingPriceBounds : public pbqp::BranchAndBoundBounds {
@@ -321,7 +323,7 @@ void test_priced_donation() {
                            pending[1].work + pending[1].skipped;
   check(std::abs(accounted - 1) < 1e-12);
   progress.finish();
-  check(log.count == 100 && !log.invalid);
+  check(log.latest == 100 && !log.invalid);
 }
 
 void test_progress_donation() {
@@ -368,9 +370,9 @@ void test_progress_donation() {
                            pending[1].work + pending[1].skipped;
   check(std::abs(accounted - 1) < 1e-12);
   check(incumbent.result().cost == -2);
-  check(log.count < 100 && !log.invalid);
+  check(log.latest < 100 && !log.invalid);
   progress.finish();
-  check(log.count == 100 && !log.invalid);
+  check(log.latest == 100 && !log.invalid);
 }
 } // namespace
 

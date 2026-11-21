@@ -95,7 +95,7 @@ Every generated file ends with comments like:
 
 ```text
 END
-# generator: pbqp_generate 2.4.0+<source-fingerprint>
+# generator: pbqp_generate 2.5.0+<source-fingerprint>
 # random: mt19937_64; sampling protocol 1
 # command: ./build/pbqp_generate --mode=regalloc --nodes=10 --edges=30 --registers=4 --seed=42 --output=sample.pbqp
 ```

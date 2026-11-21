@@ -82,6 +82,7 @@ add_test(NAME cli COMMAND "${CMAKE_COMMAND}"
   "-DPBQP=$<TARGET_FILE:pbqp_cli>"
   "-DGENERATOR=$<TARGET_FILE:pbqp_generate>"
   "-DEXAMPLE=${PROJECT_SOURCE_DIR}/examples/pbqp/01_basic.pbqp"
+  "-DBUCKET_EXAMPLE=${PROJECT_SOURCE_DIR}/examples/pbqp/14_bucket_beats_bnbopt.pbqp"
   "-DHEURISTIC_EXAMPLE=${PROJECT_SOURCE_DIR}/examples/pbqp/07_parallel_exact_beats_greedy_rn.pbqp"
   "-DWORK=${PROJECT_BINARY_DIR}/cli-test"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/cli.cmake")

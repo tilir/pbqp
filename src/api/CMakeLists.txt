@@ -9,6 +9,7 @@ set(PBQP_COMPONENT_SOURCES
   bruteforce.cpp
   branch_and_bound.cpp
   dsatur.cpp
+  bucket.cpp
   greedy.cpp
   reduction.cpp
   solve.cpp
@@ -24,6 +25,7 @@ set(PBQP_COMPONENT_MODULES
   greedy_api.cppm
   reduction_api.cppm
   dsatur_api.cppm
+  bucket_api.cppm
   io_api.cppm
   evaluation_api.cppm
   api_boundary.cppm

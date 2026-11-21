@@ -94,7 +94,7 @@ copy = nil
 check(frees == [3])
 
 library = PBQP::Library.new(ARGV[0])
-check(library.version == [2, 4, 0])
+check(library.version == [2, 5, 0])
 Dir.mktmpdir do |directory|
   path = File.join(directory, 'timeout.pbqp')
   File.write(path, "PBQP 1 NODES 65 EDGES 0\n" +

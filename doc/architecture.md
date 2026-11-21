@@ -14,6 +14,7 @@ changing partition names or making private partitions available to clients.
 | `src/search/` | Prefix jobs, dispatch, percentage boundaries, covered-space accumulation |
 | `src/solvers/naive/` | Sequential and parallel exhaustive enumeration |
 | `src/solvers/bnb/` | Unified B&B engine, reference-term bounds, optimization profiles, verified regalloc structure, capacity bounds, and pricing |
+| `src/solvers/bucket/` | Induced-graph planning, dense min-plus kernels and argmin reconstruction |
 | `src/solvers/dsatur/` | Verified-model DSATUR/tabu coloring and spill repair |
 | `src/solvers/greedy/` | Cost-priority assignment |
 | `src/solvers/reduction/` | Reduction graph, candidate worklist, propagation and reconstruction |

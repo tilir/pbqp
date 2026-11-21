@@ -1,6 +1,6 @@
 # Programmer's guide
 
-PBQP provides a stable [C API 2.4](c_api.md), a convenience
+PBQP provides a stable [C API 2.5](c_api.md), a convenience
 [C++ header](../include/pbqp.hpp), and small Python/Ruby bindings. The native
 implementation and module partitions remain private. Runnable programs live in
 [examples/programming](../examples/programming); problem data lives in
@@ -87,7 +87,7 @@ forbidden INF terms from feasible floating-point overflow.
 ## C++: RAII, vectors, spans, and exceptions
 
 Include `pbqp.hpp` and link `pbqp`. There is no public module import requirement.
-The wrapper is header-only and delegates all algorithms to C API 2.4.
+The wrapper is header-only and delegates all algorithms to C API 2.5.
 
 ```cpp
 const auto problem = pbqp::Problem::read("examples/pbqp/01_basic.pbqp");
@@ -276,7 +276,7 @@ if (status == PBQP_TIMEOUT)
 This feature requires a linked library with C API 2.2 or later; query
 `pbqp_get_api_version` when loading it separately.
 
-The `timeout-ms` SIZE key applies to naive and every B&B profile. Zero or an
+The `timeout-ms` SIZE key applies to every exact solver. Zero or an
 omitted key means unlimited time. The budget uses a monotonic clock and starts
 before input validation/preparation; it includes heuristic seeds, planning,
 worker execution, and callbacks. This is cooperative stopping: an allocation,
@@ -341,3 +341,16 @@ pbqp --solve=dsatur --verbose INPUT
 pbqp --solve=bnb -O1 -fdsatur-seed INPUT
 pbqp --solve=bnbopt -fno-dsatur-seed INPUT
 ```
+
+
+## Bucket elimination
+
+Use `PBQP_SOLVER_BUCKET` with `pbqp_solve`, or call `pbqp_solve_bucket`
+directly. C++ uses `pbqp::Solver::Bucket`, Python uses `Solver.BUCKET`, and
+Ruby uses `PBQP::Solver::BUCKET`. This selector requires native API 2.5 or
+later. Send `bucket-max-entries` as a SIZE option to set the table budget.
+Inspect solution quality after `PBQP_OK`: a failed float-order certificate
+emits a warning and yields FEASIBLE on success. Enable `warnings-as-errors`
+to reject uncertified inputs before factor computation. An over-budget
+elimination plan warns and returns `PBQP_NO_SOLUTION`. The caller selects
+any subsequent solver. See [the solver guide](solvers.md#bucket-elimination).

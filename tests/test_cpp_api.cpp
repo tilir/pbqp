@@ -46,7 +46,7 @@ void test_borrowed_and_callbacks() {
   pbqp::validate(problem);
   for (auto solver :
        {pbqp::Solver::Naive, pbqp::Solver::BranchAndBound, pbqp::Solver::Greedy,
-        pbqp::Solver::Reduction, pbqp::Solver::Dsatur}) {
+        pbqp::Solver::Reduction, pbqp::Solver::Dsatur, pbqp::Solver::Bucket}) {
     const bool exact = solver != pbqp::Solver::Greedy &&
                        solver != pbqp::Solver::Reduction &&
                        solver != pbqp::Solver::Dsatur;
@@ -54,7 +54,10 @@ void test_borrowed_and_callbacks() {
     pbqp::SolveOptions options;
     options.num_threads = 4;
     if (exact)
-      options.progress = [&](unsigned value) { check(value == ++percent); };
+      options.progress = [&](unsigned value) {
+        check(value > percent && value <= 100);
+        percent = value;
+      };
     options.diagnostics = [&](std::string_view message) {
       check(!message.empty());
       ++messages;

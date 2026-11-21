@@ -1,4 +1,4 @@
-"""Small ctypes binding for PBQP C API 2.4: file I/O, solving, and evaluation.
+"""Small ctypes binding for PBQP C API 2.5: file I/O, solving, and evaluation.
 
 SPDX-License-Identifier: GPL-3.0-only
 See LICENSE for the full license text.
@@ -19,6 +19,7 @@ class Solver(IntEnum):
     GREEDY = 3
     R1R2RN = 4
     DSATUR = 5
+    BUCKET = 6
 
 
 class Quality(IntEnum):

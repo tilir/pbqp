@@ -88,12 +88,14 @@ class SubtreeProgress {
   size_t immediate_depth = 0;
 
   void report() noexcept {
+    const auto first = next_percent;
     while (next_percent <= 100 && covered.exceeds(boundary)) {
-      callback(next_percent, user_data);
       ++next_percent;
       if (next_percent <= 100)
         percentage_boundary(problem, next_percent, boundary.data());
     }
+    if (next_percent != first)
+      callback(next_percent - 1, user_data);
   }
 
   void merge(const CoveredSpace &pending) noexcept {

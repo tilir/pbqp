@@ -132,13 +132,14 @@ void test_singleton_frontier() {
 }
 
 struct Progress {
-  unsigned count = 0;
+  unsigned latest = 0;
   bool invalid = false;
 };
 
 void report(unsigned percent, void *data) noexcept {
   auto &progress = *static_cast<Progress *>(data);
-  progress.invalid |= percent != ++progress.count || percent > 100;
+  progress.invalid |= percent <= progress.latest || percent > 100;
+  progress.latest = percent;
 }
 
 void check_seed_policy(const pbqp_problem &problem, bool greedy, bool reduction,
@@ -149,9 +150,9 @@ void check_seed_policy(const pbqp_problem &problem, bool greedy, bool reduction,
   search.prepare();
   check(search.seed_statistics().greedy == greedy);
   check(search.seed_statistics().reduction == reduction);
-  check(progress.count == 0);
+  check(progress.latest == 0);
   check(search.run(nullptr) == expected);
-  check(progress.count == 100 && !progress.invalid);
+  check(progress.latest == 100 && !progress.invalid);
   if (expected == PBQP_OK) {
     auto deleter = [](pbqp_solution *s) noexcept { pbqp_solution_free(s); };
     std::unique_ptr<pbqp_solution, decltype(deleter)> solution(
@@ -243,7 +244,7 @@ void test_runtime_donation() {
     workers.emplace_back(bounds, incumbent);
 
   struct CallbackLog {
-    std::atomic<unsigned> count{0};
+    std::atomic<unsigned> latest{0};
     std::atomic<bool> invalid{false}, entered{false};
   } log;
 
@@ -251,7 +252,7 @@ void test_runtime_donation() {
     auto &p = *static_cast<CallbackLog *>(data);
     if (p.entered.exchange(true))
       p.invalid = true;
-    if (value != p.count.fetch_add(1) + 1 || value > 100)
+    if (value <= p.latest.exchange(value) || value > 100)
       p.invalid = true;
     p.entered = false;
   };
@@ -288,7 +289,7 @@ void test_runtime_donation() {
       [&]() noexcept { queue.cancel(); });
   check(donations[0] + donations[1] > 0);
   check(incumbent.found() && incumbent.result().cost == 4);
-  check(log.count == 100 && !log.invalid);
+  check(log.latest == 100 && !log.invalid);
   pbqp_evaluation evaluation;
   check(pbqp_evaluate_assignment(&problem, incumbent.result().options,
                                  nodes.size(), &evaluation,

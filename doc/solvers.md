@@ -23,6 +23,7 @@ makes either request `PBQP_INVALID` before preparation and callbacks.
 | --- | --- | --- |
 | `PBQP_SOLVER_NAIVE` | `pbqp_solve_bruteforce` | OPTIMAL |
 | `PBQP_SOLVER_BNB` | `pbqp_solve_branch_and_bound` | OPTIMAL |
+| `PBQP_SOLVER_BUCKET` | `pbqp_solve_bucket` | OPTIMAL when certified, FEASIBLE otherwise |
 | `PBQP_SOLVER_GREEDY` | `pbqp_solve_greedy` | FEASIBLE |
 | `PBQP_SOLVER_R1R2RN` | `pbqp_solve_reduction` | FEASIBLE |
 | `PBQP_SOLVER_DSATUR` | `pbqp_solve_dsatur` | FEASIBLE |
@@ -64,6 +65,49 @@ independent contexts). NULL options select the direct single-thread path
 without callbacks. Parallel progress counts
 all visited tuples using an exact mixed-radix covered-space accumulator.
 
+## Bucket elimination
+
+`pbqp --solve=bucket --numthreads=4 --verbose INPUT` builds a minimum-degree
+induced graph and eliminates each variable in turn. A bucket consumes all
+factors containing its variable and writes a dense min-plus table on the
+remaining neighbors. Its cells are independent and sufficiently large tables
+use contiguous output ranges on oneTBB workers. Reconstruction reads saved
+argmins in reverse elimination order. `--verbose` reports the induced width,
+generated entry count, and peak worker count. `--heartbeat` reports completed
+buckets at bucket boundaries, so a large individual bucket can take several
+seconds between notifications.
+
+The SIZE key `bucket-max-entries` defaults to 4,194,304. It limits the
+cumulative entry count of generated cost tables and their argmin tables.
+Argmins use the narrowest supported unsigned type that holds the eliminated
+variable's option index, starting at one byte for up to 256 options. Cost
+tables are released after consumption. A separate planning limit caps separator-pair
+checks at 8,388,608. An over-budget plan emits a warning and returns
+`PBQP_NO_SOLUTION`. Verbose output identifies the rejected separator and
+reports its full table size whenever representable. Budget zero disallows
+generated entries.
+
+Regrouping additions can change which assignment minimizes the reference
+float objective. The certification pass checks a common power-of-two lattice
+and bounds the sum of per-factor maximum absolute finite entries in its units.
+The bound must fit both the float significand and the finite float range. On
+certification failure, bucket warns and a successful result is FEASIBLE.
+The kernel uses ordinary double addition to keep finite intermediate costs
+distinct from forbidden INF entries. The final assignment is evaluated in
+original term order. Infeasibility proofs depend only on explicit prohibitions.
+
+Warnings are displayed by the CLI without `--verbose`. With `-Werror` the
+warning becomes `PBQP_INVALID` before factor computation. Callers choose any
+subsequent solver explicitly. See the
+[paper implementation notes](../papers/peyrard2019-implementation.md) for the
+algorithm and induced-width complexity.
+
+[Example 14](../examples/pbqp/14_bucket_beats_bnbopt.pbqp) is a 5-by-5 grid
+with four options per variable. The chosen order has induced width five, so
+the largest intermediate factor has 1,024 entries. Both bucket and B&B O2
+prove a cost of 93. The grid's arbitrary pairwise costs leave B&B with
+generic bounds, whose preliminary interval is [20, 103] on this example.
+
 ## Branch-and-bound
 
 ```sh
@@ -74,7 +118,7 @@ pbqp --solve=bnb --numthreads=4 --heartbeat \
 `bnb` is exact under the reference float semantics. It returns any optimum;
 the winning assignment on a tie can depend on scheduling. `naive` retains its
 lexicographic tie rule. `--numthreads=N` is positive, defaults to 1, and is
-accepted by all three exact solvers. It limits oneTBB arena concurrency, including the caller;
+accepted by all exact solvers. It limits oneTBB arena concurrency, including the caller;
 workload size and available TBB resources may reduce actual concurrency.
 
 Preparation checks the root bound first. A root infeasibility proof skips both
@@ -454,9 +498,31 @@ original problem and its cost is recomputed by the shared reference evaluator.
 Example 07 runs through both heuristics in CTest, without starting exact
 search. Neither heuristic is guaranteed to dominate the other on all inputs.
 
+### Optional bucket refinement
+
+`pbqp --solve=r1r2rn -fbucket-width=3 --verbose INPUT` enables a single
+bucket refinement pass after a successful reduction solve. The SIZE option
+`bucket-width` specifies a limit on the **induced width of the chosen
+elimination order**. The default and values up to two use plain R1/R2/RN.
+
+When the residual plan exceeds the width, table or work limits, the pass
+fixes a highest-degree remaining variable to its reduction assignment and
+retries. Ties use the lowest node ID. Before the kernel runs, edges crossing
+the fixed/free boundary become unary costs on the free variables. The pass
+uses one thread and limits planning to 32 fixed variables, tables to
+4,194,304 generated entries, and the sum of candidate grid sizes to
+8,388,608. The requested width is a ceiling, so budgets may require a
+narrower residual. Larger widths can increase time and memory use.
+
+The pass keeps the original solution if no residual plan fits, conditioning
+overflows, or the candidate fails to improve the reference-order cost.
+Every successful result remains FEASIBLE. On
+[example 14](../examples/pbqp/14_bucket_beats_bnbopt.pbqp), the default
+returns 103, width three returns 94, and width five returns 93.
+
 ## Heartbeat
 
-`--heartbeat` is supported by `naive`, `bnb`, and `bnbopt`. It writes at most
+`--heartbeat` is supported by `naive`, `bnb`, `bnbopt`, and `bucket`. It writes at most
 100 flushed dots to stderr, with a final newline. Solution records remain on
 stdout. No dot is emitted at zero progress. Percentages describe search progress,
 not elapsed time or an ETA.
@@ -504,8 +570,9 @@ that equal percentages take equal time. Children and frontier jobs may contain
 very different amounts of work. New incumbents can close branches which survived
 an earlier check. Percentages are monotone but can pause or jump; rounding and
 very small weights can also defer notifications. The final dot is reserved until
-all workers have joined. Empty searches and root proofs still report 1 through
-100 after successful preparation.
+all workers have joined. Empty searches and root proofs can report 100 as
+their only notification. The CLI fills skipped percentages up to the latest
+notification and starts a new line at 100.
 
 Lookahead has private preallocated child-bound caches and is resumable within
 the usual DFS quantum. It introduces no search-loop allocations. Without a

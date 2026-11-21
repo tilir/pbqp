@@ -5,7 +5,7 @@
  * and edge matrix entries. Missing edges contribute zero; INF forbids a node
  * option or a pair. This header defines the in-memory format, min-plus
  * cost algebra, text I/O, ownership helpers, and exact/heuristic solvers.
- * C API version 2.4 is described in doc/c_api.md. The implementation uses
+ * C API version 2.5 is described in doc/c_api.md. The implementation uses
  * C++23; all public declarations are C-compatible. See doc/format.md for the
  * PBQP 1/2 text formats.
  *
@@ -20,7 +20,7 @@
 #pragma once
 
 /** @file pbqp.h
- * @brief Stable C API 2.4 for PBQP data, file I/O, and solvers.
+ * @brief Stable C API 2.5 for PBQP data, file I/O, and solvers.
  */
 
 /** @mainpage PBQP API reference
@@ -46,7 +46,7 @@ extern "C" {
  * Text-format versions are independent of the C API version. */
 enum {
   PBQP_API_VERSION_MAJOR = 2, /**< Breaking compatibility version. */
-  PBQP_API_VERSION_MINOR = 4, /**< Compatible API additions. */
+  PBQP_API_VERSION_MINOR = 5, /**< Compatible API additions. */
   PBQP_API_VERSION_PATCH = 0  /**< Compatible fixes. */
 };
 
@@ -241,15 +241,15 @@ void pbqp_problem_free(pbqp_problem *problem);
  */
 void pbqp_solution_free(pbqp_solution *solution);
 
-/** Called synchronously with increasing integer percentages, from 1 through
- * 100, at most once per percentage. Naive reports exact visited-tuple
- * percentages; B&B reports an approximate fraction of the surviving search
- * tree, excluding immediate cuts. Neither is an elapsed-time estimate.
- * Several percentages may be reported together. user_data is borrowed for
- * the call. Notifications are serialized and may run on TBB workers during a
- * parallel call. Workers may batch updates. Successful exhaustion or a proof
- * of infeasibility reports 100; B&B reserves 100 until all workers have joined.
- * A callback must not throw or modify the problem or its arrays. */
+/** Called synchronously with strictly increasing integer percentages in
+ * [1, 100]. Notifications can skip percentages. Naive reports exact
+ * visited-tuple percentages; B&B reports an approximate fraction of the
+ * surviving search tree, excluding immediate cuts. Neither is an elapsed-time
+ * estimate. user_data is borrowed for the call. Notifications are serialized
+ * and may run on TBB workers during a parallel call. Workers may batch updates.
+ * Successful exhaustion or a proof of infeasibility reports 100; B&B reserves
+ * 100 until all workers have joined. A callback must not throw or modify the
+ * problem or its arrays. */
 typedef void (*pbqp_progress_callback)(unsigned percent, void *user_data);
 
 /** Optional human-readable preparation diagnostics. Each message is a borrowed
@@ -423,7 +423,9 @@ typedef enum pbqp_solver
   PBQP_SOLVER_BNB = 1,    /**< Exact branch-and-bound. */
   PBQP_SOLVER_GREEDY = 3, /**< Cost-priority assignment heuristic. */
   PBQP_SOLVER_R1R2RN = 4, /**< Reduction/backpropagation heuristic. */
-  PBQP_SOLVER_DSATUR = 5  /**< DSATUR/tabu heuristic with greedy fallback. */
+  PBQP_SOLVER_DSATUR = 5, /**< DSATUR/tabu heuristic with greedy fallback. */
+  PBQP_SOLVER_BUCKET =
+      6 /**< Bucket elimination with float-order certification. */
 } pbqp_solver;
 
 /** Dispatches to the selected solver with the same contracts as its dedicated
@@ -532,6 +534,23 @@ pbqp_status pbqp_solve_dsatur(const pbqp_problem *problem,
                               const pbqp_solve_options *options,
                               pbqp_solution **out, pbqp_error *error);
 
+/** Exact min-plus bucket elimination with the borrowing and ownership rules
+ * of pbqp_solve_branch_and_bound. Accepts the common exact solver options
+ * and SIZE "bucket-max-entries" (default 4,194,304), the cumulative entry
+ * limit for generated factors and their matching argmin tables.
+ * Returns PBQP_NO_SOLUTION if planning exceeds a budget. Warns if finite
+ * float arithmetic cannot be certified exact under reassociation, in which
+ * case a successful result carries PBQP_SOLUTION_FEASIBLE. Warnings flow
+ * through the warning sink and become PBQP_INVALID under warnings-as-errors.
+ * Bucket progress is based on
+ * completed eliminations; callbacks run after the bucket's workers join.
+ * PBQP_OK returns an optimal assignment if certified. PBQP_INFEASIBLE
+ * proves that no feasible tuple exists. PBQP_TIMEOUT returns no solution.
+ */
+pbqp_status pbqp_solve_bucket(const pbqp_problem *problem,
+                              const pbqp_solve_options *options,
+                              pbqp_solution **out, pbqp_error *error);
+
 /** R0/R1/R2/RN reduction heuristic with the same validation, borrowing,
  * ownership, and diagnostic contracts as pbqp_solve_greedy. R1 propagates leaf
  * costs to a neighbor; R2 creates or updates a neighbor-pair matrix. RN removes
@@ -544,7 +563,12 @@ pbqp_status pbqp_solve_dsatur(const pbqp_problem *problem,
  * PBQP_SOLUTION_FEASIBLE, including empty and R1/R2-only problems; the reported
  * cost is recomputed in reference order. Returns PBQP_NO_SOLUTION on a dead
  * end, never PBQP_INFEASIBLE. Fill matrices are allocated during preparation;
- * backpropagation performs no allocation. */
+ * backpropagation performs no allocation.
+ * Optional SIZE "bucket-width" values above two enable one bounded bucket
+ * refinement pass. It fixes some variables at their reduction assignments
+ * until the residual plan fits the requested induced width and work limits.
+ * Only a strictly cheaper feasible assignment replaces the reduction result.
+ * The default and values from zero through two use plain R1/R2/RN. */
 pbqp_status pbqp_solve_reduction(const pbqp_problem *problem,
                                  const pbqp_solve_options *options,
                                  pbqp_solution **out, pbqp_error *error);
