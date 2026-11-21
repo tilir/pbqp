@@ -44,10 +44,12 @@ void test_borrowed_and_callbacks() {
   const pbqp_node node{costs.size(), costs.data()};
   const pbqp_problem problem{1, 0, &node, nullptr};
   pbqp::validate(problem);
-  for (auto solver : {pbqp::Solver::Naive, pbqp::Solver::BranchAndBound,
-                      pbqp::Solver::Greedy, pbqp::Solver::Reduction}) {
-    const bool exact =
-        solver != pbqp::Solver::Greedy && solver != pbqp::Solver::Reduction;
+  for (auto solver :
+       {pbqp::Solver::Naive, pbqp::Solver::BranchAndBound, pbqp::Solver::Greedy,
+        pbqp::Solver::Reduction, pbqp::Solver::Dsatur}) {
+    const bool exact = solver != pbqp::Solver::Greedy &&
+                       solver != pbqp::Solver::Reduction &&
+                       solver != pbqp::Solver::Dsatur;
     unsigned percent = 0, messages = 0;
     pbqp::SolveOptions options;
     options.num_threads = 4;

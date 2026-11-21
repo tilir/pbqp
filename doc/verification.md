@@ -54,7 +54,7 @@ cleanup tests, I/O failures (including `/dev/full` when available), greedy
 traps, and sparse graph generation without quadratic pair scans. Reduction
 coverage includes R1 orientations, heterogeneous domains, R2 fill and existing
 edges, RN dead ends, overflow feasibility, and input/solution ownership.
-`07_parallel_exact_beats_heuristics.pbqp` runs only through greedy and r1r2rn in tests;
+`07_parallel_exact_beats_greedy_rn.pbqp` runs only through greedy and r1r2rn in tests;
 validate both assignments and reference-order costs without exact search.
 Randomized trees, forests, and cycles use quarter-step costs small enough that
 all intermediate sums are exact. Compare feasibility and optimum cost with
@@ -316,3 +316,30 @@ a newly published destination, and staging cleanup. CLI tests reject special
 output files without blocking, check a nonempty SHA-256 identity, and replay
 provenance. `generator_fingerprint` checks CRLF/LF, source edits, new source
 inputs, duplicate/order independence, and checkout-path independence.
+
+## DSATUR and coloring seeding
+
+`test_dsatur` checks public feasible quality, retained input/independent output,
+negative and forbidden spills, reachable float overflow, failed greedy rescued
+by a bipartite coloring, heterogeneous/coalescing fallback, workspace fallback,
+and more than 64 used register colors. Small generated pure-interference cases
+compare reference cost/feasibility against naive and the greedy fallback.
+A test-only module bridge checks zero-budget behavior without exporting private
+partitions. The generated 180/10000/32 seed-1 regalloc case verifies a full
+zero-cost coloring and an O0-plus-dsatur-seed root proof, without referring to
+an untracked fixture or asserting wall time. CLI checks cover solver selection,
+quality, diagnostics, and warning policy; C/C++ and binding suites include the
+new selector and the compatible 2.3 version.
+
+The optional `pbqp_benchmark_dsatur` Google Benchmark target measures the same
+180/10000/32 seed-1 recipe with standalone DSATUR and exact B&B O2 seeding.
+Generation and a zero-cost/feasibility/quality preflight are outside timing;
+measured iterations include public validation, preparation, and solution cleanup.
+There is no dependency on an untracked fixture, and these benchmarks are not
+CTest entries:
+
+```sh
+cmake -S . -B build-clang-modules -DPBQP_BUILD_BENCHMARKS=ON
+cmake --build build-clang-modules --target pbqp_benchmark_dsatur
+./build-clang-modules/pbqp_benchmark_dsatur --benchmark_repetitions=3
+```

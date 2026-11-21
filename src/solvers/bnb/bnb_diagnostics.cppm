@@ -13,6 +13,7 @@ module;
 #include <vector>
 module pbqp:bnb_diagnostics;
 import :diagnostics;
+import :interference;
 import :bnb_term_bounds;
 import :bnb_options;
 import :bnb_structure;

@@ -97,7 +97,7 @@ int main(int argc, char **argv) {
   benchmark::RegisterBenchmark(
       "BranchAndBound/Example07",
       [](benchmark::State &s) {
-        example(s, "examples/pbqp/07_parallel_exact_beats_heuristics.pbqp",
+        example(s, "examples/pbqp/07_parallel_exact_beats_greedy_rn.pbqp",
                 10.1112299F, size_t{1});
       })
       ->ArgNames({"threads", "heartbeat"})
@@ -124,7 +124,7 @@ int main(int argc, char **argv) {
   benchmark::RegisterBenchmark(
       "BranchAndBoundOpt/Example07",
       [](benchmark::State &s) {
-        example(s, "examples/pbqp/07_parallel_exact_beats_heuristics.pbqp",
+        example(s, "examples/pbqp/07_parallel_exact_beats_greedy_rn.pbqp",
                 10.1112299F, size_t{2});
       })
       ->ArgNames({"threads", "heartbeat"})

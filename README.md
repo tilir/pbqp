@@ -1,6 +1,6 @@
 # PBQP
 
-A PBQP library with C API 2.2, a C++23 interface, and Python/Ruby bindings.
+A PBQP library with C API 2.3, a C++23 interface, and Python/Ruby bindings.
 Reads PBQP 1/2, writes compact PBQP 2, and solves with exact and heuristic algorithms.
 
 Requires CMake 3.28 or newer, Ninja, Clang 21.1 with `clang-scan-deps`,
@@ -20,8 +20,9 @@ List available solvers, solve a problem, or generate a random instance:
 ./build/pbqp --solve=naive --numthreads=4 examples/pbqp/01_basic.pbqp
 ./build/pbqp --solve=bnbopt --numthreads=4 --heartbeat --verbose \
   examples/pbqp/09_more_bnbopts.pbqp
-./build/pbqp --solve=greedy examples/pbqp/07_parallel_exact_beats_heuristics.pbqp
-./build/pbqp --solve=r1r2rn examples/pbqp/07_parallel_exact_beats_heuristics.pbqp
+./build/pbqp --solve=greedy examples/pbqp/07_parallel_exact_beats_greedy_rn.pbqp
+./build/pbqp --solve=r1r2rn examples/pbqp/07_parallel_exact_beats_greedy_rn.pbqp
+./build/pbqp --solve=dsatur examples/pbqp/11_dsatur.pbqp
 ./build/pbqp_generate --mode=regalloc --nodes=1000 --edges=3000 \
   --registers=16 --seed=42 --output=build/regalloc.pbqp
 ./build/pbqp --solve=greedy build/regalloc.pbqp

@@ -13,7 +13,6 @@ module;
 // vectors.
 #include <vector>
 module pbqp:bnb_api;
-import :api_boundary;
 import :solve_options;
 import :failure;
 import :error;
@@ -41,45 +40,40 @@ BnbOptions read_bnb_options(const SolveOptionsView &view) {
 }
 
 pbqp_status solve_bnb(const pbqp_problem *p, const pbqp_solve_options *options,
-                      pbqp_solution **out, pbqp_error *error) noexcept {
-  if (out)
-    *out = nullptr;
-  return api_call(error, [&]() -> pbqp_status {
-    if (!out)
-      return set_error(error, PBQP_INVALID, 0, "missing output pointer");
-    const CommonSolveOptions config(options);
-    const auto deadline = config.deadline();
-    const auto optimizations = read_bnb_options(config.view);
-    validate(p);
-    if (auto status = config.check_unknown(error); status != PBQP_OK)
-      return status;
-    if (deadline.enabled())
-      config.log.line("options: timeout-ms=",
-                      config.view.size("timeout-ms", 0));
-    config.log.line("options: optimization profile=O",
-                    config.view.size("optimization-level", 1),
-                    "; explicit overrides apply after the profile");
-    config.log.line("options: optimization settings (input eligibility and "
-                    "budgets checked during preparation)");
-    if (config.log)
-      for (const auto &entry : bnb_optimizations)
-        config.log.line("options: ", entry.key, "=",
-                        optimizations.enabled(entry.optimization) ? "enabled"
-                                                                  : "disabled");
-    if (optimizations.requested(BnbOptimization::Repricing) &&
-        !optimizations.enabled(BnbOptimization::WeightedBounds))
-      config.log.line("options: repricing requires weighted-bounds");
-    if (deadline.expired())
-      return set_error(error, PBQP_TIMEOUT, 0, "exact search timed out");
-    BranchAndBoundSearch<BranchAndBoundBounds> search(
-        *p, config.threads, config.progress, config.progress_data, config.log,
-        optimizations, deadline);
-    search.prepare();
-    auto status = search.run(error);
-    if (status != PBQP_OK)
-      return status;
-    *out = search.release_solution();
-    return PBQP_OK;
-  });
+                      pbqp_solution **out, pbqp_error *error) {
+  if (!out)
+    return set_error(error, PBQP_INVALID, 0, "missing output pointer");
+  const CommonSolveOptions config(options);
+  const auto deadline = config.deadline();
+  const auto optimizations = read_bnb_options(config.view);
+  validate(p);
+  if (auto status = config.check_unknown(error); status != PBQP_OK)
+    return status;
+  if (deadline.enabled())
+    config.log.line("options: timeout-ms=", config.view.size("timeout-ms", 0));
+  config.log.line("options: optimization profile=O",
+                  config.view.size("optimization-level", 1),
+                  "; explicit overrides apply after the profile");
+  config.log.line("options: optimization settings (input eligibility and "
+                  "budgets checked during preparation)");
+  if (config.log)
+    for (const auto &entry : bnb_optimizations)
+      config.log.line("options: ", entry.key, "=",
+                      optimizations.enabled(entry.optimization) ? "enabled"
+                                                                : "disabled");
+  if (optimizations.requested(BnbOptimization::Repricing) &&
+      !optimizations.enabled(BnbOptimization::WeightedBounds))
+    config.log.line("options: repricing requires weighted-bounds");
+  if (deadline.expired())
+    return set_error(error, PBQP_TIMEOUT, 0, "exact search timed out");
+  BranchAndBoundSearch<BranchAndBoundBounds> search(
+      *p, config.threads, config.progress, config.progress_data, config.log,
+      optimizations, deadline);
+  search.prepare();
+  auto status = search.run(error);
+  if (status != PBQP_OK)
+    return status;
+  *out = search.release_solution();
+  return PBQP_OK;
 }
 } // namespace pbqp

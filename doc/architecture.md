@@ -14,11 +14,16 @@ changing partition names or making private partitions available to clients.
 | `src/search/` | Prefix jobs, dispatch, percentage boundaries, covered-space accumulation |
 | `src/solvers/naive/` | Sequential and parallel exhaustive enumeration |
 | `src/solvers/bnb/` | Unified B&B engine, reference-term bounds, optimization profiles, verified regalloc structure, capacity bounds, and pricing |
+| `src/solvers/dsatur/` | Verified-model DSATUR/tabu coloring and spill repair |
 | `src/solvers/greedy/` | Cost-priority assignment |
 | `src/solvers/reduction/` | Reduction graph, candidate worklist, propagation and reconstruction |
 
-C entry points validate borrowed data, invoke the implementation, translate
-exceptions, and transfer independent output ownership. Text I/O entry points
+C entry points reset outputs and delegate to named internal functions through
+`api_call`, which clears errors, forwards arguments, and translates exceptions.
+Private `*_api.cppm` partitions own validation, options, preparation, and output
+transfer; public `.cpp` units keep the C definitions thin. Validation's void
+internal function can be passed directly, with normal return meaning OK. Avoid
+wrapping whole API implementations in capturing lambdas. Text I/O entry points
 stay in `api/`; stream mechanics stay in `io/`. `problem_reader.cppm` handles
 both text versions, retains compact sparse definitions, and materializes one
 dense array per referenced PBQP 2 matrix;
@@ -147,3 +152,20 @@ rename. Its source identity reuses the component-owned production library and
 tool source aggregates, with normalized LF contents and paths relative to the
 checkout. Including the whole production library is conservative but prevents
 changes in the C I/O boundary or new partitions from escaping the identity.
+
+## Coloring heuristic
+
+`core/interference.cppm` owns the original-input model check and its cached
+failure metadata. Term bounds, diagnostics, and DSATUR share that check without
+making `core` depend on a solver. B&B passes its cached decision to the seed;
+coalescing and nonuniform domains never enter specialized recoloring.
+
+`solvers/dsatur/dsatur.cppm` owns CSR adjacency, color counts, tabu tenure,
+construction, conflict-reducing local moves, spill repair, resource accounting,
+and independent solution storage. Preparation allocates every buffer; run does
+not allocate, log, or throw. `dsatur_diagnostics.cppm` formats cached eligibility,
+limits, counters, and outcomes outside local-search loops. `api/dsatur.cpp`
+composes this heuristic with a greedy fallback and keeps the better valid result.
+B&B orchestration invokes DSATUR independently after greedy and before reduction
+when `dsatur-seed` is enabled; the seed needs neither structural bound workspace
+nor a complete independent-set catalogue. Bounds and workers do not import it.

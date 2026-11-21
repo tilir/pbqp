@@ -19,25 +19,10 @@ module;
 
 module pbqp:bnb_term_bounds;
 import :failure;
+import :interference;
 import :bnb_options;
 
 namespace pbqp {
-enum class InterferenceFailure {
-  None,
-  Disabled,
-  Empty,
-  NoRegisters,
-  Domains,
-  RegisterCost,
-  MatrixCost
-};
-
-struct InterferenceCheck {
-  InterferenceFailure failure = InterferenceFailure::None;
-  size_t node = 0, option = 0, edge = 0, row = 0, col = 0;
-  pbqp_cost_t actual = 0, expected = 0;
-};
-
 class BranchAndBoundTermBounds {
   struct EdgeMinimum {
     size_t row_offset;
@@ -69,9 +54,6 @@ private:
   void prepare_node(size_t id);
   void prepare_edge_minima();
   void cache_edge_minima(size_t id) noexcept;
-  InterferenceCheck check_interference_structure() const noexcept;
-  bool is_pure_interference_matrix(const pbqp_edge &edge, size_t domain,
-                                   InterferenceCheck &result) const noexcept;
   bool canonical_prefix(const size_t *tuple, size_t depth) const noexcept;
   bool prepare_allowed(const size_t *tuple, size_t depth,
                        Workspace &workspace) const noexcept;
@@ -122,8 +104,9 @@ BranchAndBoundTermBounds::BranchAndBoundTermBounds(const pbqp_problem &p,
   prepare_domains();
   prepare_edge_minima();
   if (optimizations.structural() ||
-      optimizations.enabled(BnbOptimization::RegisterSymmetry))
-    interference = check_interference_structure();
+      optimizations.enabled(BnbOptimization::RegisterSymmetry) ||
+      optimizations.enabled(BnbOptimization::DsaturSeed))
+    interference = check_interference_structure(problem);
   else
     interference.failure = InterferenceFailure::Disabled;
 }
@@ -189,60 +172,6 @@ void BranchAndBoundTermBounds::cache_edge_minima(size_t id) noexcept {
     row_minima[minimum.row_offset + row] = value;
     minimum.minimum = std::min(minimum.minimum, value);
   }
-}
-
-bool BranchAndBoundTermBounds::is_pure_interference_matrix(
-    const pbqp_edge &edge, size_t domain,
-    InterferenceCheck &result) const noexcept {
-  for (size_t row = 0; row < domain; ++row)
-    for (size_t col = 0; col < domain; ++col) {
-      auto expected = row && row == col ? PBQP_INF : 0;
-      if (edge.costs[row * domain + col] != expected) {
-        result.failure = InterferenceFailure::MatrixCost;
-        result.row = row;
-        result.col = col;
-        result.actual = edge.costs[row * domain + col];
-        result.expected = expected;
-        return false;
-      }
-    }
-  return true;
-}
-
-InterferenceCheck
-BranchAndBoundTermBounds::check_interference_structure() const noexcept {
-  // This recognizes the pure model, not every register-label symmetry.
-  InterferenceCheck result;
-  if (!problem.num_nodes) {
-    result.failure = InterferenceFailure::Empty;
-    return result;
-  }
-  if (problem.nodes[0].num_options < 2) {
-    result.failure = InterferenceFailure::NoRegisters;
-    return result;
-  }
-  size_t domain = problem.nodes[0].num_options;
-  for (size_t id = 0; id < problem.num_nodes; ++id) {
-    result.node = id;
-    const auto &node = problem.nodes[id];
-    if (node.num_options != domain) {
-      result.failure = InterferenceFailure::Domains;
-      return result;
-    }
-    for (size_t option = 1; option < domain; ++option)
-      if (node.costs[option] != 0) {
-        result.failure = InterferenceFailure::RegisterCost;
-        result.option = option;
-        result.actual = node.costs[option];
-        return result;
-      }
-  }
-  for (size_t id = 0; id < problem.num_edges; ++id) {
-    result.edge = id;
-    if (!is_pure_interference_matrix(problem.edges[id], domain, result))
-      return result;
-  }
-  return result;
 }
 
 bool BranchAndBoundTermBounds::canonical_prefix(const size_t *tuple,

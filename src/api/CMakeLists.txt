@@ -8,6 +8,7 @@ set(PBQP_COMPONENT_SOURCES
   io.cpp
   bruteforce.cpp
   branch_and_bound.cpp
+  dsatur.cpp
   greedy.cpp
   reduction.cpp
   solve.cpp
@@ -19,6 +20,12 @@ pbqp_register_format_sources(${PBQP_COMPONENT_SOURCES})
 set(PBQP_COMPONENT_MODULES
   solve_options.cppm
   bnb_api.cppm
+  bruteforce_api.cppm
+  greedy_api.cppm
+  reduction_api.cppm
+  dsatur_api.cppm
+  io_api.cppm
+  evaluation_api.cppm
   api_boundary.cppm
   error.cppm
   diagnostics.cppm

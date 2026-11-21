@@ -15,7 +15,7 @@ Both CLI names use the same engine and C entry. `bnb` defaults to `-O1`;
 | --- | --- |
 | `-O0` | Basic B&B only: independent unary/pairwise term minima in reference order, node/option ID order, mandatory feasibility checks, and incumbent pruning. No heuristic seeds, symmetry cuts, forward checking, frontier planning, donation, or structural preparation. |
 | `-O1` | O0 plus option ordering, forward checking, verified register symmetry, greedy/reduction seeds, prefix planning, and work donation. This is the former baseline `bnb`. |
-| `-O2` | O1 plus structural order, clique/cardinality/weighted bounds, prefix repricing, and the independent-set coverage seed. This is the former `bnbopt`; new structural optimizations join this profile by default. |
+| `-O2` | O1 plus structural order, clique/cardinality/weighted bounds, prefix repricing, the independent-set coverage seed, and DSATUR/tabu seeding. This is the former `bnbopt`; new structural optimizations join this profile by default. |
 
 Every name in the table below supports both `-fNAME` and `-fno-NAME`. The last
 `-O` chooses the base profile; the last explicit form for each optimization
@@ -40,6 +40,7 @@ invalid values still fail.
 | `weighted-bounds` | O2 | Prepare root prices and use auxiliary integer-weight capacities. |
 | `repricing` | O2 | Refine those weights for selected fixed prefixes. Requires `weighted-bounds`. |
 | `cover-seed` | O2 | Seed an incumbent by bounded independent-set coverage. |
+| `dsatur-seed` | O2 | Try bounded DSATUR/tabu and spill repair before reduction and structural preparation. |
 
 ```sh
 # Equivalent baseline defaults through either CLI name.
@@ -96,6 +97,7 @@ a graph algorithm could theoretically be reused elsewhere:
 | Reference-order evaluation; unary/row/matrix minima; general matrix-based forward checking | Generic, shared by `bnb` and the `bnbopt` fallback. |
 | Cheap root checks and greedy/reduction incumbents | Generic, shared by both solvers. |
 | Prefix planning, cached-bound priorities, resumable DFS, sibling donation, oneTBB dispatch, and approximate search-tree progress | Generic search machinery, shared by both solvers; the supplied bounds strategy determines its estimates. |
+| DSATUR/tabu incumbent | Model-dependent, available on any profile via `dsatur-seed`; independent of clique/capacity preparation and catalogue limits. |
 | Canonical register naming | Model-dependent and shared; requires verified interchangeable registers, not prepared clique/capacity data. |
 | Clique discovery and both structural tail orderings (section 2) | Structural path only. Clique discovery remains inside this path. |
 | Register-mask forward checking and clique spill-count DP (section 3) | Structural path only. A clique of arbitrary PBQP edges does not imply distinct registers. |
@@ -679,6 +681,30 @@ different prices. The exact solver returns reference-order cost `369.419556`.
 This is a benchmark fixture, not a routine full-search CTest. Root and prefix
 pricing use the same catalogue and numerical proof throughout.
 
+## 8. Seed with DSATUR and tabu recoloring
+
+**Scope: verified pure-interference model, independent of structural bound
+preparation.** `dsatur-seed` is enabled by O2, can be added to O0/O1, and is
+independent of `greedy-seed` and `reduction-seed`. After the cheap root check and
+optional greedy seed, try the same [DSATUR/tabu algorithm](solvers.md#dsaturtabu-heuristic)
+as the standalone solver. It uses the cached original-input model check, not a
+second scan or a reduction graph. A work- and memory-bounded coloring/repair
+search may produce a better feasible incumbent. Failure leaves ordinary B&B
+available; it does not justify pruning or an infeasibility status.
+
+Every saved assignment is reference-evaluated. Root equality can skip reduction,
+cliques, catalogue enumeration, pricing, planning, and DFS entirely. The heuristic
+needs no catalogue, so exceeding independent-set budgets does not disable it.
+Its double spill rankings and integer conflict counts are never lower bounds.
+Internal calls honor the enclosing exact-search deadline and report limits,
+work, moves, restarts, candidate cost, and eligibility outside search loops.
+
+See Brélaz [6](#ref-brelaz) and Hertz/de Werra [7](#ref-tabucol) for the underlying
+coloring methods. The 180-node, 10,000-edge, 32-register, seed-1 regalloc recipe
+exercises the path in generated regression tests: a validated zero-cost coloring
+matches the nonnegative root bound, while standalone quality stays FEASIBLE.
+This avoids a dependency on a user's untracked fixture or a timing assertion.
+
 ## Diagnostics and verification
 
 `pbqp --solve=bnbopt --verbose INPUT` reports which paths are available and
@@ -774,3 +800,13 @@ adaptations and correctness arguments are given in the preceding sections.
    *SIAM Journal on Imaging Sciences*, 2(1):183–202, 2009.
    Source of the accelerated proximal-gradient recurrence used for the
    projected price updates.
+
+6. <a id="ref-brelaz"></a> Daniel Brélaz.
+   [*New methods to color the vertices of a graph*](https://doi.org/10.1145/359094.359101).
+   *Communications of the ACM*, 22(4):251–256, 1979.
+   Source of saturation-degree vertex selection.
+
+7. <a id="ref-tabucol"></a> Alain Hertz and Dominique de Werra.
+   [*Using tabu search techniques for graph coloring*](https://doi.org/10.1007/BF02239976).
+   *Computing*, 39:345–351, 1987.
+   Source of tabu local search for fixed-color graph coloring.

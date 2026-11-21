@@ -5,7 +5,7 @@
  * and edge matrix entries. Missing edges contribute zero; INF forbids a node
  * option or a pair. This header defines the in-memory format, min-plus
  * cost algebra, text I/O, ownership helpers, and exact/heuristic solvers.
- * C API version 2.2 is described in doc/c_api.md. The implementation uses
+ * C API version 2.3 is described in doc/c_api.md. The implementation uses
  * C++23; all public declarations are C-compatible. See doc/format.md for the
  * PBQP 1/2 text formats.
  *
@@ -20,7 +20,7 @@
 #pragma once
 
 /** @file pbqp.h
- * @brief Stable C API 2.2 for PBQP data, file I/O, and solvers.
+ * @brief Stable C API 2.3 for PBQP data, file I/O, and solvers.
  */
 
 /** @mainpage PBQP API reference
@@ -46,7 +46,7 @@ extern "C" {
  * Text-format versions are independent of the C API version. */
 enum {
   PBQP_API_VERSION_MAJOR = 2, /**< Breaking compatibility version. */
-  PBQP_API_VERSION_MINOR = 2, /**< Compatible API additions. */
+  PBQP_API_VERSION_MINOR = 3, /**< Compatible API additions. */
   PBQP_API_VERSION_PATCH = 0  /**< Compatible fixes. */
 };
 
@@ -338,9 +338,10 @@ typedef struct pbqp_option {
  * - BOOL overrides: "option-order", "forward-checking", "register-symmetry",
  *   "greedy-seed", "reduction-seed", "prefix-planning", "work-donation",
  *   "structural-order", "clique-bounds", "cardinality-bounds",
- *   "weighted-bounds", "repricing", "cover-seed". Overrides apply after the
- *   profile, independent of map order. Repricing additionally requires weighted
- *   bounds. Enabled optimizations still require eligible input and resources.
+ *   "weighted-bounds", "repricing", "cover-seed", "dsatur-seed". Overrides
+ * apply after the profile, independent of map order. Repricing additionally
+ * requires weighted bounds. Enabled optimizations still require eligible input
+ * and resources.
  *
  * Optimization settings preserve correctness, reference float evaluation, and
  * result quality. Disabling forward checking retains mandatory fixed-assignment
@@ -417,7 +418,8 @@ typedef enum pbqp_solver {
   PBQP_SOLVER_NAIVE = 0,  /**< Exhaustive lexicographic enumeration. */
   PBQP_SOLVER_BNB = 1,    /**< Exact branch-and-bound. */
   PBQP_SOLVER_GREEDY = 3, /**< Cost-priority assignment heuristic. */
-  PBQP_SOLVER_R1R2RN = 4  /**< Reduction/backpropagation heuristic. */
+  PBQP_SOLVER_R1R2RN = 4, /**< Reduction/backpropagation heuristic. */
+  PBQP_SOLVER_DSATUR = 5  /**< DSATUR/tabu heuristic with greedy fallback. */
 } pbqp_solver;
 
 /** Dispatches to the selected solver with the same contracts as its dedicated
@@ -499,6 +501,29 @@ pbqp_status pbqp_solve_branch_and_bound(const pbqp_problem *problem,
  * problem happens to be infeasible. Sets *out to NULL on failure.
  * error may be NULL. */
 pbqp_status pbqp_solve_greedy(const pbqp_problem *problem,
+                              const pbqp_solve_options *options,
+                              pbqp_solution **out, pbqp_error *error);
+
+/** Bounded DSATUR/tabu heuristic with the validation, borrowing, ownership,
+ * options, and error contracts of pbqp_solve_greedy. For verified uniform
+ * interference problems, dynamically chooses uncolored nodes by distinct
+ * neighbor colors, then degree; fixes the register count, allows temporary
+ * conflicts, and applies tabu recoloring with aspiration. Repair may spill
+ * finite-cost nodes; explicit INF spill costs are never selected. Negative
+ * spills are retained when repairing. Only feasible reference-evaluated
+ * candidates can become results.
+ * Keeps the better of its candidate and a greedy fallback. Unsupported models
+ * (including coalescing or unequal domains) and workspace-budget failures use
+ * the greedy fallback; diagnostics describe the cached reason. Search has a
+ * 32 MiB workspace estimate, eight-million-work-unit limit, eight restarts, and
+ * 8192 tabu moves per restart, with restart after 512 moves without a new
+ * conflict record. These are heuristic budgets, not completeness
+ * claims. No independent-set catalogue is required.
+ * On success quality is always FEASIBLE, including a zero-cost or empty result.
+ * Returns NO_SOLUTION if neither search finds an assignment, never INFEASIBLE.
+ * Like other heuristics, unsupported progress, thread limits above one, and
+ * timeout-ms follow the ordinary warning policy. */
+pbqp_status pbqp_solve_dsatur(const pbqp_problem *problem,
                               const pbqp_solve_options *options,
                               pbqp_solution **out, pbqp_error *error);
 

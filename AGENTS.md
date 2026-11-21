@@ -52,6 +52,11 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
   (LLVM style, two spaces, no tabs).
 - Separate function, class, and struct definitions with a blank line; keep
   `SeparateDefinitionBlocks: Always` enabled in the formatter configuration.
+- Prefer standard library algorithms when they express the operation clearly.
+  Use them for ordinary searches, accumulation, transformations, and comparisons.
+- Prefer one main loop per function. Extract preparatory loops and substantial
+  nested traversals into separate functions with meaningful names, retaining the
+  main loop in its orchestrating function; do not reduce it to an empty wrapper.
 
 ## CMake and dependencies
 
@@ -102,6 +107,9 @@ catalogue, algorithms, or benchmark instructions here. Keep README short.
 - Free only unchanged parser-returned problems with `pbqp_problem_free`, and only
   unchanged solver-returned solutions with `pbqp_solution_free`, apart from NULL.
   Never pass caller-owned views to these deleters.
+- Keep C entry points thin: reset outputs, then delegate through `api_call`
+  to named functions in private API partitions. Pass the function and arguments
+  directly; avoid function-sized capturing lambdas.
 - No exception escapes C. Use shared `api_call` translation: bad_alloc to NO_MEMORY,
   length_error to OVERFLOW, other standard runtime/scheduler exceptions to
   INTERNAL_ERROR. Do not duplicate allocation checks in algorithms or add
@@ -232,3 +240,15 @@ untimed naive deadline polling compiled away. Preserve timeout, queue-wakeup,
 callback-time, fallback, and binding tests; the C example demonstrates 15000 ms
 and can accept a shorter demonstration budget. CLI `--timeout=SECONDS` maps
 exactly to milliseconds (up to three decimal places) and timeout exits with 4.
+
+## DSATUR heuristic
+
+Keep the pure-interference model checker in `core/interference.cppm`, shared by
+bounds and coloring heuristics. `dsatur` uses bounded DSATUR/tabu and spill repair
+only after verification, retaining the better result with its greedy fallback.
+Temporary conflict scores are ranking heuristics, never pruning bounds. Publish
+only complete reference-evaluated feasible candidates; failure is NO_SOLUTION,
+not INFEASIBLE. B&B's independent `dsatur-seed` defaults to O2, reuses cached
+verification, precedes reduction/structural preparation, honors the exact-call
+deadline, and requires no independent-set catalogue. Keep all buffers prepared
+before allocation-free local search and diagnostics outside its loops.

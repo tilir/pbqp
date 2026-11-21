@@ -2,7 +2,9 @@
  * Exception translation at the public C API boundary.
  *
  * Keeps allocation failures and container limits out of solver logic while
- * preserving status codes and bounded diagnostics for C callers.
+ * preserving status codes and bounded diagnostics for C callers. Named
+ * functions receive forwarded arguments directly; void return means success
+ * unless the operation throws. No captured function-sized closure is needed.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  * Distributed under GNU GPL version 3, WITHOUT ANY WARRANTY.
@@ -13,17 +15,25 @@ module;
 #include <exception>
 #include <new>
 #include <stdexcept>
+#include <type_traits>
+#include <utility>
 
 module pbqp:api_boundary;
 import :error;
 import :failure;
 
 namespace pbqp {
-template <typename Operation>
-pbqp_status api_call(pbqp_error *error, Operation operation) noexcept {
+template <typename Result, typename... Parameters, typename... Arguments>
+pbqp_status api_call(pbqp_error *error, Result (*operation)(Parameters...),
+                     Arguments &&...arguments) noexcept {
   clear_error(error);
   try {
-    return operation();
+    if constexpr (std::is_void_v<Result>) {
+      operation(std::forward<Arguments>(arguments)...);
+      return PBQP_OK;
+    } else {
+      return operation(std::forward<Arguments>(arguments)...);
+    }
   } catch (const Failure &failure) {
     return set_error(error, failure.status, failure.line, failure.message);
   } catch (const std::length_error &) {

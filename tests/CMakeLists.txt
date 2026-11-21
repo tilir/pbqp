@@ -4,6 +4,8 @@
 
 set(PBQP_TEST_SOURCES test_pbqp.cpp)
 set(PBQP_PARALLEL_TEST_SOURCES test_parallel_exact.cpp)
+set(PBQP_DSATUR_TEST_SOURCES test_dsatur.cpp)
+set(PBQP_DSATUR_TEST_SUPPORT dsatur_test_support.cpp)
 set(PBQP_TIMEOUT_TEST_SOURCES test_timeout.cpp)
 set(PBQP_REDUCTION_TEST_SOURCES test_reduction.cpp)
 set(PBQP_C_API_TEST_SOURCES test_c_api.c)
@@ -14,6 +16,7 @@ set(PBQP_INTERNAL_TEST_SUPPORT search_test_support.cpp bnb_bounds_test_support.c
   bnb_progress_test_support.cpp)
 pbqp_register_format_sources(${PBQP_TEST_SOURCES} ${PBQP_REDUCTION_TEST_SOURCES}
   ${PBQP_C_API_TEST_SOURCES} ${PBQP_CPP_API_TEST_SOURCES}
+  ${PBQP_DSATUR_TEST_SOURCES} ${PBQP_DSATUR_TEST_SUPPORT}
   ${PBQP_PARALLEL_TEST_SOURCES} ${PBQP_TIMEOUT_TEST_SOURCES}
   ${PBQP_INTERNAL_TEST_SOURCES} ${PBQP_INTERNAL_TEST_SUPPORT} ${PBQP_GENERATOR_TEST_SUPPORT} solver_profiles.hpp)
 set(PBQP_FORMAT_SOURCES "${PBQP_FORMAT_SOURCES}" PARENT_SCOPE)
@@ -40,6 +43,13 @@ target_link_libraries(test_timeout PRIVATE pbqp)
 pbqp_configure_cxx_target(test_timeout PRIVATE)
 add_test(NAME timeout COMMAND test_timeout)
 set_tests_properties(timeout PROPERTIES TIMEOUT 30)
+
+target_sources(pbqp PRIVATE ${PBQP_DSATUR_TEST_SUPPORT})
+add_executable(test_dsatur ${PBQP_DSATUR_TEST_SOURCES})
+target_link_libraries(test_dsatur PRIVATE pbqp_generator)
+pbqp_configure_cxx_target(test_dsatur PRIVATE)
+add_test(NAME dsatur COMMAND test_dsatur)
+set_tests_properties(dsatur PROPERTIES TIMEOUT 30)
 
 add_executable(test_reduction ${PBQP_REDUCTION_TEST_SOURCES})
 target_link_libraries(test_reduction PRIVATE pbqp)
@@ -72,7 +82,7 @@ add_test(NAME cli COMMAND "${CMAKE_COMMAND}"
   "-DPBQP=$<TARGET_FILE:pbqp_cli>"
   "-DGENERATOR=$<TARGET_FILE:pbqp_generate>"
   "-DEXAMPLE=${PROJECT_SOURCE_DIR}/examples/pbqp/01_basic.pbqp"
-  "-DHEURISTIC_EXAMPLE=${PROJECT_SOURCE_DIR}/examples/pbqp/07_parallel_exact_beats_heuristics.pbqp"
+  "-DHEURISTIC_EXAMPLE=${PROJECT_SOURCE_DIR}/examples/pbqp/07_parallel_exact_beats_greedy_rn.pbqp"
   "-DWORK=${PROJECT_BINARY_DIR}/cli-test"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/cli.cmake")
 

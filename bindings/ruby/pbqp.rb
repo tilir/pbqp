@@ -1,4 +1,4 @@
-# Standard-library Fiddle binding for PBQP C API 2.2.
+# Standard-library Fiddle binding for PBQP C API 2.3.
 # SPDX-License-Identifier: GPL-3.0-only
 # See LICENSE for the full license text.
 
@@ -10,7 +10,8 @@ module PBQP
     BNB = 1
     GREEDY = 3
     R1R2RN = 4
-    ALL = [NAIVE, BNB, GREEDY, R1R2RN].freeze
+    DSATUR = 5
+    ALL = [NAIVE, BNB, GREEDY, R1R2RN, DSATUR].freeze
   end
 
   module Quality

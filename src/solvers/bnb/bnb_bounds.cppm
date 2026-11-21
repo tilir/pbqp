@@ -133,6 +133,10 @@ public:
 
   const pbqp_problem &input() const noexcept { return reference.input(); }
 
+  const auto &interference_check() const noexcept {
+    return reference.interference_check();
+  }
+
   const pbqp_problem &domains() const noexcept { return structure.domains(); }
 
   size_t node(size_t step) const noexcept { return structure.node(step); }

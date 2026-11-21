@@ -26,12 +26,12 @@
 import pbqp.command_line;
 
 namespace {
-constexpr std::array<std::string_view, 13> optimization_names{
+constexpr std::array<std::string_view, 14> optimization_names{
     "option-order",       "forward-checking", "register-symmetry",
     "greedy-seed",        "reduction-seed",   "prefix-planning",
     "work-donation",      "structural-order", "clique-bounds",
     "cardinality-bounds", "weighted-bounds",  "repricing",
-    "cover-seed"};
+    "cover-seed",         "dsatur-seed"};
 
 void help() {
   std::cout
@@ -59,6 +59,7 @@ void help() {
          "  bnb     Exact branch-and-bound; prunes bounded or forbidden "
          "subtrees.\n"
          "  bnbopt  Exact B&B with structural order and clique bounds.\n"
+         "  dsatur  DSATUR/tabu heuristic with greedy fallback.\n"
          "  r1r2rn  R1/R2/RN reduction and backpropagation heuristic.\n"
          "  greedy  Cost-priority heuristic; returns a feasible, possibly "
          "suboptimal solution.\n\n"
@@ -99,6 +100,8 @@ std::optional<pbqp_solver> solver_kind(std::string_view name) {
     return PBQP_SOLVER_BNB;
   if (name == "bnbopt")
     return PBQP_SOLVER_BNB;
+  if (name == "dsatur")
+    return PBQP_SOLVER_DSATUR;
   if (name == "greedy")
     return PBQP_SOLVER_GREEDY;
   if (name == "r1r2rn")

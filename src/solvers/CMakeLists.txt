@@ -5,6 +5,7 @@
 add_subdirectory(naive)
 add_subdirectory(bnb)
 add_subdirectory(greedy)
+add_subdirectory(dsatur)
 add_subdirectory(reduction)
 
 set(PBQP_LIBRARY_SOURCES "${PBQP_LIBRARY_SOURCES}" PARENT_SCOPE)

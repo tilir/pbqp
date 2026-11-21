@@ -13,11 +13,14 @@ module;
 #include "pbqp.h"
 
 module pbqp;
+import :api_boundary;
 import :bnb_api;
 
 extern "C" pbqp_status
 pbqp_solve_branch_and_bound(const pbqp_problem *p,
                             const pbqp_solve_options *options,
                             pbqp_solution **out, pbqp_error *error) {
-  return pbqp::solve_bnb(p, options, out, error);
+  if (out)
+    *out = nullptr;
+  return pbqp::api_call(error, pbqp::solve_bnb, p, options, out, error);
 }

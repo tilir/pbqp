@@ -94,7 +94,7 @@ copy = nil
 check(frees == [3])
 
 library = PBQP::Library.new(ARGV[0])
-check(library.version == [2, 2, 0])
+check(library.version == [2, 3, 0])
 Dir.mktmpdir do |directory|
   path = File.join(directory, 'timeout.pbqp')
   File.write(path, "PBQP 1 NODES 65 EDGES 0\n" +
@@ -119,7 +119,7 @@ solutions = library.read(ARGV[1]) do |problem|
     evaluation = problem.evaluate(result.options)
     check(evaluation.is_feasible && evaluation.cost == result.cost)
     check(result.cost.zero?)
-    expected = [PBQP::Solver::GREEDY, PBQP::Solver::R1R2RN].include?(solver) ?
+    expected = [PBQP::Solver::GREEDY, PBQP::Solver::R1R2RN, PBQP::Solver::DSATUR].include?(solver) ?
       PBQP::Quality::FEASIBLE : PBQP::Quality::OPTIMAL
     check(result.quality == expected)
     result

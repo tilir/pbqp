@@ -28,6 +28,9 @@ import :parallel;
 import :error;
 import :evaluation;
 import :greedy;
+import :dsatur;
+import :dsatur_diagnostics;
+import :interference;
 import :reduction;
 import :bnb_cover;
 import :diagnostics;
@@ -64,7 +67,7 @@ template <typename Bounds = BranchAndBoundTermBounds>
 class BranchAndBoundSearch {
 public:
   struct SeedStatistics {
-    bool greedy = false, reduction = false, cover = false;
+    bool greedy = false, dsatur = false, reduction = false, cover = false;
   };
 
 private:
@@ -165,6 +168,22 @@ void BranchAndBoundSearch<Bounds>::seed_incumbent(pbqp_cost_t root_bound) {
         greedy.run(nullptr, deadline) == PBQP_OK) {
       const auto &seed = greedy.get_solution();
       incumbent.update(seed.options, seed.cost);
+    }
+  }
+  if (deadline.expired() || !incumbent.can_improve(root_bound))
+    return;
+  // Seeding uses cached model metadata and no catalogue or reduction graph.
+  if (optimizations.enabled(BnbOptimization::DsaturSeed)) {
+    const auto check = bounds.interference_check();
+    DsaturSearch dsatur(problem, {}, deadline);
+    const bool ready = dsatur.prepare(check);
+    describe_dsatur(problem, check, dsatur, diagnostics, "bnb: dsatur seed: ");
+    if (ready) {
+      seeds.dsatur = true;
+      dsatur.run();
+      describe_dsatur_result(dsatur, diagnostics, "bnb: dsatur seed: ");
+      if (dsatur.has_solution())
+        incumbent.update(dsatur.result().options, dsatur.result().cost);
     }
   }
   if (deadline.expired() || !incumbent.can_improve(root_bound) ||

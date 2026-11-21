@@ -1,6 +1,6 @@
 # Programmer's guide
 
-PBQP provides a stable [C API 2.2](c_api.md), a convenience
+PBQP provides a stable [C API 2.3](c_api.md), a convenience
 [C++ header](../include/pbqp.hpp), and small Python/Ruby bindings. The native
 implementation and module partitions remain private. Runnable programs live in
 [examples/programming](../examples/programming); problem data lives in
@@ -87,7 +87,7 @@ forbidden INF terms from feasible floating-point overflow.
 ## C++: RAII, vectors, spans, and exceptions
 
 Include `pbqp.hpp` and link `pbqp`. There is no public module import requirement.
-The wrapper is header-only and delegates all algorithms to C API 2.2.
+The wrapper is header-only and delegates all algorithms to C API 2.3.
 
 ```cpp
 const auto problem = pbqp::Problem::read("examples/pbqp/01_basic.pbqp");
@@ -310,3 +310,32 @@ The CLI spelling is `--timeout=15` (seconds, up to three decimal places).
 For example, `pbqp --solve=bnbopt --timeout=0.250 INPUT` requests 250 ms.
 Timeout prints a diagnostic, produces no solution records, and exits with code
 4. Exit codes 0/1/2/3 retain their success/error/infeasible/no-solution meanings.
+
+## DSATUR heuristic and B&B seed
+
+API 2.3 adds `PBQP_SOLVER_DSATUR` / `pbqp_solve_dsatur`. C++ calls use
+`pbqp::Solver::Dsatur`, Python uses `Solver.DSATUR`, and Ruby uses
+`PBQP::Solver::DSATUR`. The solver returns FEASIBLE even for a zero-cost result;
+inspect the status before using the independently owned assignment.
+
+```c
+pbqp_status status = pbqp_solve(PBQP_SOLVER_DSATUR, problem, NULL,
+                               &solution, &error);
+```
+
+The specialized algorithm requires a verified pure-interference model. General
+PBQP inputs, unequal domains, coalescing, and excessive specialized workspace
+use a greedy fallback; `diagnostics` / `--verbose` explain which path ran.
+See [the solver description](solvers.md#dsaturtabu-heuristic) for construction,
+repair, resource budgets, and the distinction between conflicts and PBQP costs.
+
+B&B O2 enables the independent `dsatur-seed` BOOL option by default. It can be
+selected on any profile; it requires the verified model but no prepared clique
+or independent-set catalogue. It improves the incumbent only; bounds and proof
+requirements remain unchanged.
+
+```sh
+pbqp --solve=dsatur --verbose INPUT
+pbqp --solve=bnb -O1 -fdsatur-seed INPUT
+pbqp --solve=bnbopt -fno-dsatur-seed INPUT
+```

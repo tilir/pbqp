@@ -47,7 +47,8 @@ static int test_dispatch(const pbqp_problem *problem) {
   } solvers[] = {{PBQP_SOLVER_NAIVE, pbqp_solve_bruteforce, 1},
                  {PBQP_SOLVER_BNB, pbqp_solve_branch_and_bound, 1},
                  {PBQP_SOLVER_GREEDY, pbqp_solve_greedy, 0},
-                 {PBQP_SOLVER_R1R2RN, pbqp_solve_reduction, 0}};
+                 {PBQP_SOLVER_R1R2RN, pbqp_solve_reduction, 0},
+                 {PBQP_SOLVER_DSATUR, pbqp_solve_dsatur, 0}};
 
   size_t i;
   for (i = 0; i < sizeof(solvers) / sizeof(solvers[0]); ++i) {
@@ -337,7 +338,7 @@ int main(void) {
   if (version.major != PBQP_API_VERSION_MAJOR ||
       version.minor != PBQP_API_VERSION_MINOR ||
       version.patch != PBQP_API_VERSION_PATCH || version.major != 2 ||
-      version.minor != 2 || version.patch != 0)
+      version.minor != 3 || version.patch != 0)
     return 1;
   pbqp_cost_t costs[] = {4, -2};
   pbqp_node node = {2, costs};

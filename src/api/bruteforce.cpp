@@ -14,55 +14,13 @@ module;
 
 module pbqp;
 import :api_boundary;
-import :deadline;
-import :solve_options;
-import :bruteforce;
-import :bruteforce_parallel;
-import :error;
-import :diagnostics;
-import :problem;
+import :bruteforce_api;
 
-extern "C" {
-pbqp_status pbqp_solve_bruteforce(const pbqp_problem *p,
-                                  const pbqp_solve_options *options,
-                                  pbqp_solution **out, pbqp_error *error) {
+extern "C" pbqp_status pbqp_solve_bruteforce(const pbqp_problem *p,
+                                             const pbqp_solve_options *options,
+                                             pbqp_solution **out,
+                                             pbqp_error *error) {
   if (out)
     *out = nullptr;
-  return pbqp::api_call(error, [&]() -> pbqp_status {
-    if (!out)
-      return pbqp::set_error(error, PBQP_INVALID, 0, "missing output pointer");
-    const pbqp::CommonSolveOptions config(options);
-    const auto deadline = config.deadline();
-    size_t threads = config.threads;
-    pbqp::validate(p);
-    if (auto status = config.check_unknown(error); status != PBQP_OK)
-      return status;
-    const auto log = config.log;
-    log.line("naive: exhaustive lexicographic search; requested threads=",
-             threads);
-    if (deadline.expired())
-      return pbqp::set_error(error, PBQP_TIMEOUT, 0, "exact search timed out");
-    if (deadline.enabled())
-      log.line("options: timeout-ms=", config.view.size("timeout-ms", 0));
-    auto progress = config.progress;
-    auto data = config.progress_data;
-    if (threads == 1) {
-      pbqp::BruteForceSearch search(*p, progress, data, deadline);
-      search.prepare();
-      auto status = search.run(error);
-      if (status != PBQP_OK)
-        return status;
-      *out = search.release_solution();
-    } else {
-      pbqp::ParallelBruteForceSearch search(*p, threads, progress, data,
-                                            deadline);
-      search.prepare();
-      auto status = search.run(error);
-      if (status != PBQP_OK)
-        return status;
-      *out = search.release_solution();
-    }
-    return PBQP_OK;
-  });
+  return pbqp::api_call(error, pbqp::solve_bruteforce, p, options, out, error);
 }
-} // extern "C"

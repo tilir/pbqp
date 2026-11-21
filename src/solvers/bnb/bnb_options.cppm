@@ -25,7 +25,8 @@ enum class BnbOptimization : unsigned {
   CardinalityBounds = 1u << 9,
   WeightedBounds = 1u << 10,
   Repricing = 1u << 11,
-  CoverSeed = 1u << 12
+  CoverSeed = 1u << 12,
+  DsaturSeed = 1u << 13
 };
 
 enum class BnbProfile { O0, O1, O2 };
@@ -37,6 +38,7 @@ struct BnbOptimizationInfo {
 };
 
 constexpr std::array bnb_optimizations{
+    BnbOptimizationInfo{"dsatur-seed", BnbOptimization::DsaturSeed},
     BnbOptimizationInfo{"option-order", BnbOptimization::OptionOrder,
                         BnbProfile::O1},
     BnbOptimizationInfo{"forward-checking", BnbOptimization::ForwardChecking,
@@ -88,8 +90,10 @@ public:
   }
 
   bool structural() const noexcept {
-    return bits & ((all_mask ^ o1_mask) ^
-                   static_cast<unsigned>(BnbOptimization::Repricing));
+    constexpr unsigned seeds =
+        static_cast<unsigned>(BnbOptimization::DsaturSeed);
+    return bits & ((all_mask ^ o1_mask) &
+                   ~static_cast<unsigned>(BnbOptimization::Repricing) & ~seeds);
   }
 
   bool catalogue() const noexcept {

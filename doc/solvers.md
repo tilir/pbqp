@@ -25,6 +25,7 @@ makes either request `PBQP_INVALID` before preparation and callbacks.
 | `PBQP_SOLVER_BNB` | `pbqp_solve_branch_and_bound` | OPTIMAL |
 | `PBQP_SOLVER_GREEDY` | `pbqp_solve_greedy` | FEASIBLE |
 | `PBQP_SOLVER_R1R2RN` | `pbqp_solve_reduction` | FEASIBLE |
+| `PBQP_SOLVER_DSATUR` | `pbqp_solve_dsatur` | FEASIBLE |
 
 Unknown enum values return `PBQP_INVALID` without callbacks. Both forms validate
 input and options, clear the output pointer on failure, and transfer ownership
@@ -168,7 +169,7 @@ compares 1/4/16 threads with heartbeat enabled and disabled.
 | Example | Greedy | R1/R2/RN | Exact optimum |
 | --- | ---: | ---: | ---: |
 | [06_exact_beats_heuristics.pbqp](../examples/pbqp/06_exact_beats_heuristics.pbqp) | 22.1286182 | 22.1286182 | 0 |
-| [07_parallel_exact_beats_heuristics.pbqp](../examples/pbqp/07_parallel_exact_beats_heuristics.pbqp) | 91.4585114 | 54.0987892 | 10.1112299 |
+| [07_parallel_exact_beats_greedy_rn.pbqp](../examples/pbqp/07_parallel_exact_beats_greedy_rn.pbqp) | 91.4585114 | 54.0987892 | 10.1112299 |
 
 ## Optimized branch-and-bound
 
@@ -336,11 +337,57 @@ breaking ties by ID. It chooses the first cheapest allowed option using costs
 to already assigned nodes. This is cheap and may be suboptimal. A successful
 result is FEASIBLE; a dead end is NO_SOLUTION, not proof of INFEASIBLE.
 
+## DSATUR/tabu heuristic
+
+`--solve=dsatur` runs the bounded coloring heuristic on verified uniform pure
+interference inputs, retaining the better reference-cost result of that search
+and greedy. Unsupported inputs (unequal domains, nonzero register unaries,
+coalescing/general matrices) and excessive workspace use greedy fallback, with
+cached reasons reported through diagnostics. No caller-owned input is modified.
+Success is always FEASIBLE; failure of both paths is NO_SOLUTION, never a proof
+of infeasibility. The empty problem uses the zero-cost greedy fallback.
+
+Construction chooses the uncolored vertex with the largest number of distinct
+neighbor register colors, then largest original degree. Shuffled ranks break
+remaining ties. It assigns the register with the fewest conflicts, preferring
+its ID. With a fixed register count, construction may temporarily create
+conflicts. Tabu search then considers recoloring conflicted vertices, minimizing
+the resulting total conflict-edge count. It permits worsening moves, forbids
+recent reverse moves, and overrides a tabu restriction only for a new conflict
+record (aspiration). Tenure is `7 + floor(3 * conflicted_vertices / 5) + (next_mt19937 % 10)`.
+Random tie ranking affects search only, never feasibility or exact bounds.
+
+At construction and new conflict records, repair spills negative-cost nodes,
+then repeatedly removes a conflict vertex with the smallest finite spill-cost
+per incident conflict. INF spills are forbidden. An unrepairable coloring is
+discarded; only complete candidates accepted by the shared reference evaluator
+are retained. Finite overflowed totals remain feasible. Spill rankings use
+double only as a heuristic; saved costs always follow original float order.
+
+Workspace uses CSR adjacency and node-by-register count/tabu arrays, with a
+conservative 32 MiB estimate. Search has 8,388,608 work units, eight restarts,
+8192 moves per restart, and restarts after 512 moves without improving the
+conflict record. Candidate scans, adjacency updates, and reference evaluations
+are charged; allocation, model verification, and greedy fallback remain ordinary
+preparation work. Search allocates no workspace while running. Budgets retain
+only fully verified candidates, and no independent-set catalogue is required.
+Standalone DSATUR follows the common heuristic warning policy for heartbeat,
+multiple threads, and timeout-ms. As an internal B&B seed it honors that exact
+call's cooperative deadline and can close the root when its incumbent meets
+the root bound. B&B defaults and flags are documented in [bnbopts](bnbopts.md).
+
+The construction and local-search methods follow Brélaz's
+[*New methods to color the vertices of a graph*](https://doi.org/10.1145/359094.359101)
+and Hertz/de Werra's
+[*Using tabu search techniques for graph coloring*](https://doi.org/10.1007/BF02239976).
+The bounded work policy, greedy fallback, weighted spill repair, and PBQP float
+semantics above describe this implementation's adaptations.
+
 ## R1/R2/RN reduction heuristic
 
 ```sh
-pbqp --solve=greedy examples/pbqp/07_parallel_exact_beats_heuristics.pbqp
-pbqp --solve=r1r2rn examples/pbqp/07_parallel_exact_beats_heuristics.pbqp
+pbqp --solve=greedy examples/pbqp/07_parallel_exact_beats_greedy_rn.pbqp
+pbqp --solve=r1r2rn examples/pbqp/07_parallel_exact_beats_greedy_rn.pbqp
 ```
 
 `--solve=r1r2rn` implements the reduction/backpropagation scheme used by LLVM

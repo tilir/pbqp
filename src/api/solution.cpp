@@ -13,10 +13,8 @@ module;
 
 module pbqp;
 import :api_boundary;
-import :error;
 import :ownership;
-import :problem;
-import :evaluation;
+import :evaluation_api;
 
 extern "C" {
 void pbqp_solution_free(pbqp_solution *solution) {
@@ -28,20 +26,7 @@ pbqp_status pbqp_evaluate_assignment(const pbqp_problem *p,
                                      pbqp_evaluation *out, pbqp_error *error) {
   if (out)
     *out = {};
-  return pbqp::api_call(error, [&]() -> pbqp_status {
-    if (!out)
-      return pbqp::set_error(error, PBQP_INVALID, 0,
-                             "missing evaluation output");
-    pbqp::validate(p);
-    if (num_nodes != p->num_nodes || (num_nodes && !options))
-      return pbqp::set_error(error, PBQP_INVALID, 0,
-                             "invalid assignment size or pointer");
-    for (size_t k = 0; k < num_nodes; ++k)
-      if (options[k] >= p->nodes[k].num_options)
-        return pbqp::set_error(error, PBQP_INVALID, 0,
-                               "assignment option index out of range");
-    out->is_feasible = pbqp::evaluate_assignment(*p, options, out->cost);
-    return PBQP_OK;
-  });
+  return pbqp::api_call(error, pbqp::evaluate_problem_assignment, p, options,
+                        num_nodes, out, error);
 }
 } // extern "C"

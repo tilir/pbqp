@@ -489,7 +489,7 @@ void check_reference(const pbqp_problem &p) {
       "greedy-seed",        "reduction-seed",   "prefix-planning",
       "work-donation",      "structural-order", "clique-bounds",
       "cardinality-bounds", "weighted-bounds",  "repricing",
-      "cover-seed"};
+      "cover-seed",         "dsatur-seed"};
   for (auto name : optimization_names)
     for (bool enabled : {false, true}) {
       auto configured = [&](const pbqp_problem *input,
@@ -1114,7 +1114,7 @@ void test_reduction() {
         PBQP_OK);
   pbqp_solution_free(answer);
 
-  check(pbqp_read("examples/pbqp/07_parallel_exact_beats_heuristics.pbqp", &raw,
+  check(pbqp_read("examples/pbqp/07_parallel_exact_beats_greedy_rn.pbqp", &raw,
                   nullptr) == PBQP_OK);
   std::unique_ptr<pbqp_problem, decltype(free_problem)> large(raw,
                                                               free_problem);

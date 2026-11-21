@@ -21,7 +21,7 @@ class BindingTests(unittest.TestCase):
         self.library = Library(LIBRARY)
 
     def test_all_solvers_and_lifetime(self):
-        self.assertEqual(self.library.version, (2, 2, 0))
+        self.assertEqual(self.library.version, (2, 3, 0))
         with self.library.read(EXAMPLE) as problem:
             solutions = []
             for solver in Solver:
@@ -32,7 +32,7 @@ class BindingTests(unittest.TestCase):
                 self.assertEqual(solution.cost, 0)
                 self.assertEqual(solution.quality,
                                  Quality.FEASIBLE if solver in (Solver.GREEDY,
-                                                               Solver.R1R2RN)
+                                                               Solver.R1R2RN, Solver.DSATUR)
                                  else Quality.OPTIMAL)
                 solutions.append(solution)
         problem.close()
