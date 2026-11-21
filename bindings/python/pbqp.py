@@ -169,7 +169,7 @@ class Library:
     def read(self, path):
         pointer = ct.POINTER(_Problem)()
         error = _Error()
-        _check(self._dll.pbqp_read(os.fsencode(path), ct.byref(pointer),
+        _check(self._dll.pbqp_read(_encode_path(path), ct.byref(pointer),
                                   ct.byref(error)), error)
         try:
             return Problem(self, pointer)
@@ -178,28 +178,41 @@ class Library:
             raise
 
 
+def _encode_path(path):
+    encoded = os.fsencode(path)
+    if b"\0" in encoded:
+        raise ValueError("embedded null byte in PBQP path")
+    return encoded
+
+
+class _ProblemHandle:
+    def __init__(self, library, pointer):
+        self.pointer = pointer
+        self.cleanup = weakref.finalize(
+            self, library._dll.pbqp_problem_free, pointer
+        )
+
+
 class Problem:
     """Own a parsed problem. Use a context manager or call close explicitly.
 
-    A finalizer also releases abandoned handles. Do not close a problem while
+    Shallow copies share a handle. Closing either alias closes both.
+    A finalizer releases the handle when its last owner is collected. Do not close a problem while
     another thread is using it. Returned Solution objects contain Python-owned
     copies and remain valid after close.
     """
 
     def __init__(self, library, pointer):
         self._library = library
-        self._pointer = pointer
-        self._cleanup = weakref.finalize(
-            self, library._dll.pbqp_problem_free, pointer
-        )
+        self._handle = _ProblemHandle(library, pointer)
 
     def _require_open(self):
-        if not self._cleanup.alive:
+        if not self._handle.cleanup.alive:
             raise RuntimeError("PBQP problem is closed")
-        return self._pointer
+        return self._handle.pointer
 
     def close(self):
-        self._cleanup()
+        self._handle.cleanup()
 
     def __enter__(self):
         self._require_open()
@@ -211,7 +224,7 @@ class Problem:
     def write(self, path):
         error = _Error()
         _check(self._library._dll.pbqp_write(
-            os.fsencode(path), self._require_open(), ct.byref(error)
+            _encode_path(path), self._require_open(), ct.byref(error)
         ), error)
 
     def solve(self, solver=Solver.BNB, *, num_threads=1, options=None):

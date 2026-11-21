@@ -129,14 +129,15 @@ static int test_dispatch(const pbqp_problem *problem) {
         pbqp_diagnostic_option("diagnostics", record_diagnostic),
         pbqp_pointer_option("diagnostic-data", &diagnostics)};
     pbqp_solve_options options = {5, options_entries};
-    pbqp_solution *solution = NULL;
+    pbqp_solution sentinel = {0};
+    pbqp_solution *solution = &sentinel;
     pbqp_error error;
-    if (pbqp_solve((pbqp_solver)7, problem, &options, &solution, &error) !=
+    if (pbqp_solve((pbqp_solver)255, problem, &options, &solution, &error) !=
             PBQP_INVALID ||
         solution || !error.message[0] || error.line || progress.count ||
         diagnostics.count)
       return 0;
-    if (pbqp_solve((pbqp_solver)7, problem, NULL, NULL, NULL) != PBQP_INVALID)
+    if (pbqp_solve((pbqp_solver)-1, problem, NULL, NULL, NULL) != PBQP_INVALID)
       return 0;
   }
   return 1;
@@ -338,7 +339,7 @@ int main(void) {
   if (version.major != PBQP_API_VERSION_MAJOR ||
       version.minor != PBQP_API_VERSION_MINOR ||
       version.patch != PBQP_API_VERSION_PATCH || version.major != 2 ||
-      version.minor != 3 || version.patch != 0)
+      version.minor != 3 || version.patch != 1)
     return 1;
   pbqp_cost_t costs[] = {4, -2};
   pbqp_node node = {2, costs};

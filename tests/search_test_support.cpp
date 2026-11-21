@@ -13,6 +13,7 @@ module;
 #include "pbqp.h"
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <new>
 #include <source_location>
@@ -26,6 +27,7 @@ import :branch_and_bound;
 import :diagnostics;
 import :problem;
 import :search_tasks;
+import :deadline;
 import :bnb_work_queue;
 import :bnb_worker;
 import :bnb_term_bounds;
@@ -108,6 +110,16 @@ void test_singleton_frontier() {
   });
   check(calls == 2 && closed.tasks.empty());
   check(closed.covered_depths == std::vector<size_t>{1024});
+
+  const pbqp::Deadline deadline(1);
+  auto interrupted = pbqp::plan_prefixes(
+      problem, 4,
+      [](const pbqp::PrefixTask &) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        return true;
+      },
+      deadline);
+  check(interrupted.tasks.empty() && interrupted.covered_depths.empty());
   pbqp::BranchAndBoundTermBounds bounds(problem);
   pbqp::BranchAndBoundIncumbent incumbent(problem.num_nodes);
   pbqp::PrefixPlanner<pbqp::BranchAndBoundTermBounds> planner(bounds,

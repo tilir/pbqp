@@ -11,6 +11,7 @@
 #include "generator_version.hpp"
 #include "pbqp.h"
 #include <algorithm>
+#include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -21,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/stat.h>
 #include <system_error>
 #include <vector>
 
@@ -85,6 +87,7 @@ std::string shell_quote(std::string_view argument) {
 // file.
 class StagedOutput {
   std::filesystem::path target, directory, temporary;
+  std::filesystem::perms access = std::filesystem::perms::unknown;
   bool owned = false;
 
 public:
@@ -98,6 +101,8 @@ public:
         !std::filesystem::is_regular_file(status))
       throw std::invalid_argument("generator output must be a regular file, "
                                   "not a symlink or special file");
+    if (std::filesystem::is_regular_file(status))
+      access = status.permissions() & std::filesystem::perms::all;
     auto parent = target.parent_path();
     if (parent.empty())
       parent = ".";
@@ -107,11 +112,13 @@ public:
       directory = parent / (".pbqp-generate-" + std::to_string(names()) + "-" +
                             std::to_string(attempt));
       temporary = directory / "problem.pbqp";
-      if (std::filesystem::create_directory(directory, error)) {
+      // Restrict access at creation, before writing task data.
+      if (::mkdir(directory.c_str(), S_IRWXU) == 0) {
         owned = true;
         return;
       }
-      if (error)
+      error = {errno, std::generic_category()};
+      if (error != std::errc::file_exists)
         throw std::filesystem::filesystem_error(
             "cannot create staging directory", directory, error);
     }
@@ -130,7 +137,11 @@ public:
 
   const std::filesystem::path &path() const noexcept { return temporary; }
 
-  void publish() { std::filesystem::rename(temporary, target); }
+  void publish() {
+    if (access != std::filesystem::perms::unknown)
+      std::filesystem::permissions(temporary, access);
+    std::filesystem::rename(temporary, target);
+  }
 };
 
 void provenance(std::string_view path, int argc, char **argv) {

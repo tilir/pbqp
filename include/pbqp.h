@@ -47,7 +47,7 @@ extern "C" {
 enum {
   PBQP_API_VERSION_MAJOR = 2, /**< Breaking compatibility version. */
   PBQP_API_VERSION_MINOR = 3, /**< Compatible API additions. */
-  PBQP_API_VERSION_PATCH = 0  /**< Compatible fixes. */
+  PBQP_API_VERSION_PATCH = 1  /**< Compatible fixes. */
 };
 
 /** Runtime API version; independent of the PBQP text format version. */
@@ -414,8 +414,11 @@ pbqp_diagnostic_option(const char *key, pbqp_diagnostic_callback value) {
 }
 
 /** Solver selection for the common dispatcher. */
-typedef enum pbqp_solver {
-  PBQP_SOLVER_NAIVE = 0,  /**< Exhaustive lexicographic enumeration. */
+typedef enum pbqp_solver
+#ifdef __cplusplus
+    : unsigned int
+#endif
+{ PBQP_SOLVER_NAIVE = 0,  /**< Exhaustive lexicographic enumeration. */
   PBQP_SOLVER_BNB = 1,    /**< Exact branch-and-bound. */
   PBQP_SOLVER_GREEDY = 3, /**< Cost-priority assignment heuristic. */
   PBQP_SOLVER_R1R2RN = 4, /**< Reduction/backpropagation heuristic. */

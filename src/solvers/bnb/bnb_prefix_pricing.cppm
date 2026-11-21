@@ -78,6 +78,14 @@ public:
 
   size_t iterations_used() const noexcept { return completed_iterations; }
 
+  size_t group_count() const noexcept { return groups; }
+
+  std::span<const size_t> group_candidates(size_t group) const noexcept {
+    return std::span<const size_t>(candidates)
+        .subspan(group_offsets[group],
+                 group_offsets[group + 1] - group_offsets[group]);
+  }
+
   bool begin(std::span<const BitSet<>> colored,
              const BitSet<> &assigned) noexcept;
   bool relax(double temperature) noexcept;
@@ -160,7 +168,7 @@ void PrefixPriceOptimizer::build_groups(
   groups = iteration_work = 0;
   for (const auto &color : colored) {
     if (!color.any())
-      break;
+      continue;
     ++used_colors;
     group_offsets[groups] = count;
     multiplicity[groups++] = 1;

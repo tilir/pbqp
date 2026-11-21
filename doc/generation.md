@@ -84,8 +84,9 @@ before hashing; `.gitattributes` also requests LF text checkouts. Matching finge
 conservative: even a comment-only source edit changes the identity.
 
 The CLI stages the task and its metadata together in an exclusively created
-sibling directory, closes both writes, then renames the completed file to the
-requested destination. Failure before publication preserves an existing output
+owner-only sibling directory, closes both writes, then renames the completed
+file to the requested destination. Replacing a regular file preserves its permission bits.
+Failure before publication preserves an existing output
 and removes staging data. This is atomic publication, not a crash-durability
 promise (`fsync` is not performed). Output must be a regular file or a new path;
 symlinks, directories, devices, and FIFOs are rejected rather than reopened.
@@ -94,7 +95,7 @@ Every generated file ends with comments like:
 
 ```text
 END
-# generator: pbqp_generate 2.3.0+<source-fingerprint>
+# generator: pbqp_generate 2.3.1+<source-fingerprint>
 # random: mt19937_64; sampling protocol 1
 # command: ./build/pbqp_generate --mode=regalloc --nodes=10 --edges=30 --registers=4 --seed=42 --output=sample.pbqp
 ```

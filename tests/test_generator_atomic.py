@@ -7,6 +7,7 @@ See LICENSE for the full license text.
 from pathlib import Path
 import os
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,7 @@ with tempfile.TemporaryDirectory() as directory:
     target = root / "output.pbqp"
     original = b"previous complete file\n"
     target.write_bytes(original)
+    target.chmod(0o600)
     arguments = [sys.argv[1], "--nodes=0", "--edges=0", "--max-options=1",
                  "--seed=0", f"--output={target}"]
     # The empty task fits in 100 bytes; the provenance does not. This exercises
@@ -36,6 +38,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert failed.returncode == 1, failed
     assert b"metadata write failed" in failed.stderr, failed.stderr
     assert target.read_bytes() == original
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
     assert list(root.iterdir()) == [target], list(root.iterdir())
 
     # The same failure must not publish a new, apparently complete task either.
@@ -51,3 +54,10 @@ with tempfile.TemporaryDirectory() as directory:
     contents = target.read_bytes()
     assert b"END\n# generator: " in contents and b"# command:" in contents
     assert list(root.iterdir()) == [target]
+
+    target.chmod(0o600)
+    replaced = subprocess.run(arguments, capture_output=True, timeout=10,
+                              umask=0o022)
+    assert replaced.returncode == 0, replaced.stderr
+    assert target.read_bytes() == contents
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600

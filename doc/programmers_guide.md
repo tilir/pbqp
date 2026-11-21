@@ -150,7 +150,7 @@ PYTHONPATH=bindings/python python3 examples/programming/solve.py \
 
 The example uses an explicit native-library path; it does not search the system
 for an arbitrary PBQP installation. The loader queries the runtime version and
-requires major API version 1 before using other C layouts.
+requires major API version 2 before using other C layouts.
 
 ```python
 from pbqp import Library, Solver
@@ -165,7 +165,9 @@ print(solution.cost, solution.quality, solution.options)
 ```
 
 `Problem.close()` is idempotent. The context manager closes on success or error;
-a finalizer also frees abandoned problems. Calls on a closed problem fail.
+shallow copies share a handle, and closing any alias closes the handle for
+all aliases. A finalizer frees the handle when its last owner is collected.
+Calls on a closed problem fail. Paths containing NUL raise `ValueError`.
 Results contain immutable Python-owned tuples; native solution storage is freed
 before `solve` returns. The problem and library stay alive while in use.
 `PBQPError` exposes `status` (`Status`) and `line`. Unknown solver selections,

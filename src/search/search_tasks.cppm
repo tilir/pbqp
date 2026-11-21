@@ -19,6 +19,7 @@ module;
 #include <vector>
 
 module pbqp:search_tasks;
+import :deadline;
 
 namespace pbqp {
 class PrefixQueue {
@@ -50,9 +51,11 @@ struct PrefixPlan {
 };
 
 void batch_children(PrefixPlan &plan, const PrefixTask &parent, size_t count,
-                    size_t slots) {
+                    size_t slots, Deadline deadline) {
   size_t width = count / slots + (count % slots != 0);
   for (size_t begin = 0; begin < count;) {
+    if (deadline.expired())
+      return;
     size_t end = begin + std::min(width, count - begin);
     plan.tasks.push_back({parent.ranks, begin, end});
     begin = end;
@@ -60,8 +63,8 @@ void batch_children(PrefixPlan &plan, const PrefixTask &parent, size_t count,
 }
 
 template <typename Keep>
-PrefixPlan plan_prefixes(const pbqp_problem &problem, size_t threads,
-                         Keep keep) {
+PrefixPlan plan_prefixes(const pbqp_problem &problem, size_t threads, Keep keep,
+                         Deadline deadline = Deadline{}) {
   PrefixPlan plan;
   const auto limit = std::numeric_limits<size_t>::max();
   size_t target = threads > limit / 32 ? limit : threads * 32;
@@ -79,14 +82,19 @@ PrefixPlan plan_prefixes(const pbqp_problem &problem, size_t threads,
   for (size_t expanded = 0; !frontier.empty() &&
                             frontier.size() + plan.tasks.size() < target &&
                             expanded < budget;) {
+    if (deadline.expired())
+      return {};
     auto parent = std::move(frontier.front());
     frontier.pop_front();
     size_t original_depth = parent.ranks.size();
     // Singleton runs introduce no branching. Append them in place and check
     // the resulting prefix once; do not spend the fan-out budget on them.
     while (parent.ranks.size() < problem.num_nodes &&
-           problem.nodes[parent.ranks.size()].num_options == 1)
+           problem.nodes[parent.ranks.size()].num_options == 1) {
+      if (deadline.expired())
+        return {};
       parent.ranks.push_back(0);
+    }
     if (parent.ranks.size() != original_depth && !retain(parent))
       continue;
     if (parent.ranks.size() == problem.num_nodes) {
@@ -97,10 +105,14 @@ PrefixPlan plan_prefixes(const pbqp_problem &problem, size_t threads,
     size_t domain = problem.nodes[parent.ranks.size()].num_options;
     size_t slots = target - frontier.size() - plan.tasks.size();
     if (domain > slots) {
-      batch_children(plan, parent, domain, slots);
+      batch_children(plan, parent, domain, slots, deadline);
+      if (deadline.expired())
+        return {};
       continue;
     }
     for (size_t rank = 0; rank < domain; ++rank) {
+      if (deadline.expired())
+        return {};
       PrefixTask child = parent;
       child.ranks.push_back(rank);
       if (retain(child))
@@ -108,6 +120,8 @@ PrefixPlan plan_prefixes(const pbqp_problem &problem, size_t threads,
     }
   }
   while (!frontier.empty()) {
+    if (deadline.expired())
+      return {};
     plan.tasks.push_back(std::move(frontier.front()));
     frontier.pop_front();
   }

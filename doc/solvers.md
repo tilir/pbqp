@@ -301,7 +301,10 @@ input dimensions, requested thread limit, heartbeat setting, and returned result
 quality to stderr. The normal COST/NODE records on stdout are unchanged.
 The `options:` prefix identifies optimization profiles, switches, and their
 configuration dependencies. The `search:` prefix identifies actual search
-parameters, planning, workers, and preliminary bounds.
+parameters, planning, workers, and preliminary bounds. Naive and both B&B
+profiles report the number of prepared search workers separately from the
+available concurrency limit. This counts the caller on the serial path.
+B&B reports zero workers when preparation proves the result at the root.
 
 For `bnbopt`, it also reports cached eligibility and preparation decisions:
 input-shape mismatches with node/edge entries, graph and clique budgets,

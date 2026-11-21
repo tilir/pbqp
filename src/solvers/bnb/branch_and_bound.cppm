@@ -344,8 +344,6 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare() {
   size_t count = plan.tasks.empty() ? 0 : num_threads;
   queue = std::make_unique<CoarseWorkQueue>(
       count ? bounds.input().num_nodes : 0, count, plan);
-  diagnostics.line("search: prepared workers=", count,
-                   "; initial jobs=", plan.tasks.size());
   workers.reserve(count);
   if (progress)
     progress_workers.reserve(count);
@@ -363,6 +361,8 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare() {
 
 template <typename Bounds>
 pbqp_status BranchAndBoundSearch<Bounds>::run(pbqp_error *error) {
+  diagnostics.line("search: prepared workers=", workers.size(),
+                   "; initial jobs=", plan.tasks.size());
   if (interrupted.load())
     return set_error(error, PBQP_TIMEOUT, 0, "exact search timed out");
   run_parallel(

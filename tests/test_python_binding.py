@@ -4,6 +4,8 @@ SPDX-License-Identifier: GPL-3.0-only
 See LICENSE for the full license text.
 """
 
+import copy
+import gc
 from pathlib import Path
 import sys
 import tempfile
@@ -21,7 +23,7 @@ class BindingTests(unittest.TestCase):
         self.library = Library(LIBRARY)
 
     def test_all_solvers_and_lifetime(self):
-        self.assertEqual(self.library.version, (2, 3, 0))
+        self.assertEqual(self.library.version, (2, 3, 1))
         with self.library.read(EXAMPLE) as problem:
             solutions = []
             for solver in Solver:
@@ -39,6 +41,40 @@ class BindingTests(unittest.TestCase):
         self.assertTrue(all(s.options for s in solutions))
         with self.assertRaises(RuntimeError):
             problem.solve()
+
+    def test_shallow_copy_owns_handle(self):
+        for close_copy in (False, True):
+            original = self.library.read(EXAMPLE)
+            alias = copy.copy(original)
+            (alias if close_copy else original).close()
+            with self.assertRaises(RuntimeError):
+                (original if close_copy else alias).solve()
+
+        original = self.library.read(EXAMPLE)
+        with copy.copy(original) as alias:
+            del original
+            gc.collect()
+            self.assertEqual(alias.solve().cost, 0)
+
+    def test_paths_reject_nul(self):
+        class BytesPath:
+            def __fspath__(self):
+                return self.path
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "existing.pbqp"
+            contents = b"preserve this file"
+            target.write_bytes(contents)
+            bad = str(target) + "\0suffix"
+            byte_path = BytesPath()
+            byte_path.path = bad.encode()
+            with self.library.read(EXAMPLE) as problem:
+                for path in (bad, bad.encode(), Path(bad), byte_path):
+                    with self.assertRaises(ValueError):
+                        problem.write(path)
+                    with self.assertRaises(ValueError):
+                        self.library.read(path)
+                    self.assertEqual(target.read_bytes(), contents)
 
     def test_open_option_map(self):
         with self.library.read(EXAMPLE) as problem:

@@ -25,7 +25,7 @@ as the `api-reference` artifact.
 
 ## Version and compatibility
 
-The current C API is **2.3.0**. Header constants
+The current C API is **2.3.1**. Header constants
 `PBQP_API_VERSION_MAJOR`, `PBQP_API_VERSION_MINOR`, and `PBQP_API_VERSION_PATCH`
 describe the header; `pbqp_get_api_version` reports the linked library's version.
 The independent `PBQP 1`/`PBQP 2` signatures are not C API versions.
@@ -34,7 +34,7 @@ API 2.x preserves existing function signatures, numeric enum values, public
 struct layouts and field types, and ownership rules. Compatible additions use a
 minor version; compatible fixes use a patch version. Breaking those contracts,
 including adding fields to an existing public struct, requires a new major API
-version. Shared libraries use VERSION `2.3.0` and SOVERSION `2`.
+version. Shared libraries use VERSION `2.3.1` and SOVERSION `2`.
 
 Binary compatibility requires the same platform ABI and architecture. Use normal
 C layout and calling conventions without short-enum or packing options. Native

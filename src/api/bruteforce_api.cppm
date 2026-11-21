@@ -10,6 +10,7 @@ module;
 #include "pbqp.h"
 module pbqp:bruteforce_api;
 import :deadline;
+import :parallel;
 import :solve_options;
 import :bruteforce;
 import :bruteforce_parallel;
@@ -25,15 +26,17 @@ pbqp_status solve_bruteforce(const pbqp_problem *p,
     return set_error(error, PBQP_INVALID, 0, "missing output pointer");
   const CommonSolveOptions config(options);
   const auto deadline = config.deadline();
-  size_t threads = config.threads;
   validate(p);
   if (auto status = config.check_unknown(error); status != PBQP_OK)
     return status;
+  const auto threads = parallel_concurrency(config.threads);
   const auto log = config.log;
   log.line("naive: exhaustive lexicographic search; requested threads=",
-           threads);
-  if (deadline.expired())
+           config.threads, "; available concurrency=", threads);
+  if (deadline.expired()) {
+    log.line("search: prepared workers=0");
     return set_error(error, PBQP_TIMEOUT, 0, "exact search timed out");
+  }
   if (deadline.enabled())
     log.line("options: timeout-ms=", config.view.size("timeout-ms", 0));
   auto progress = config.progress;
@@ -41,6 +44,7 @@ pbqp_status solve_bruteforce(const pbqp_problem *p,
   if (threads == 1) {
     BruteForceSearch search(*p, progress, data, deadline);
     search.prepare();
+    log.line("search: prepared workers=1");
     auto status = search.run(error);
     if (status != PBQP_OK)
       return status;
@@ -48,6 +52,7 @@ pbqp_status solve_bruteforce(const pbqp_problem *p,
   } else {
     ParallelBruteForceSearch search(*p, threads, progress, data, deadline);
     search.prepare();
+    log.line("search: prepared workers=", search.worker_count());
     auto status = search.run(error);
     if (status != PBQP_OK)
       return status;

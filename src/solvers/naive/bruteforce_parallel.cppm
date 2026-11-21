@@ -145,6 +145,8 @@ public:
       progress = std::make_unique<SubtreeProgress>(p, callback, data);
   }
 
+  size_t worker_count() const noexcept { return workers.size(); }
+
   void prepare();
   pbqp_status run(pbqp_error *error);
 
@@ -152,8 +154,10 @@ public:
 };
 
 void ParallelBruteForceSearch::prepare() {
-  plan = plan_prefixes(problem, num_threads,
-                       [](const PrefixTask &) { return true; });
+  plan = plan_prefixes(
+      problem, num_threads, [](const PrefixTask &) { return true; }, deadline);
+  if (deadline.expired())
+    return;
   // Each consumer receives increasing queue indices. Ordered disjoint prefixes
   // therefore preserve lexicographic order within every worker, including ties.
   std::sort(plan.tasks.begin(), plan.tasks.end(),
@@ -162,15 +166,19 @@ void ParallelBruteForceSearch::prepare() {
                 return a.ranks < b.ranks;
               return a.child_begin < b.child_begin;
             });
+  if (deadline.expired())
+    return;
   size_t count = std::min(num_threads, plan.tasks.size());
-  if (progress) {
+  if (progress)
     progress_workers.reserve(count);
-    for (size_t id = 0; id < count; ++id)
+  workers.reserve(count);
+  for (size_t id = 0; id < count; ++id) {
+    if (deadline.expired())
+      return;
+    workers.emplace_back(problem, deadline);
+    if (progress)
       progress_workers.emplace_back(*progress);
   }
-  workers.reserve(count);
-  for (size_t id = 0; id < count; ++id)
-    workers.emplace_back(problem, deadline);
 }
 
 bool ParallelBruteForceSearch::collect() noexcept {
@@ -191,6 +199,8 @@ bool ParallelBruteForceSearch::collect() noexcept {
 }
 
 pbqp_status ParallelBruteForceSearch::run(pbqp_error *error) {
+  if (deadline.expired())
+    return set_error(error, PBQP_TIMEOUT, 0, "exact search timed out");
   run_parallel(workers.size(), [&](size_t id) noexcept {
     if (deadline.enabled())
       consume<true>(id);

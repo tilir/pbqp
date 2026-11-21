@@ -980,6 +980,39 @@ void test_price_quantization() {
         pbqp::PricingStatus::NonFinite);
 }
 
+void test_prefix_pricing_color_gap() {
+  constexpr size_t count = 3;
+  std::vector<pbqp::BitSet<>> graph(count, pbqp::BitSet<>(count, true));
+  for (size_t id = 0; id < count; ++id)
+    graph[id].reset(id);
+  pbqp::IndependentSets sets;
+  sets.prepare(graph);
+
+  const pbqp_cost_t unary[] = {10, 0, 0};
+  const pbqp_node nodes[] = {{3, unary}, {3, unary}, {3, unary}};
+  const pbqp_problem problem{count, 0, nodes, nullptr};
+  pbqp::RegallocPricing pricing;
+  pricing.prepare(problem, sets);
+  const auto plan = pbqp::plan_prefix_pricing(problem, sets, pricing, 2);
+  pbqp::PrefixPriceOptimizer optimizer(problem, sets, pricing, 2, plan);
+  std::vector<pbqp::BitSet<>> colored(2, pbqp::BitSet<>(count));
+  pbqp::BitSet<> assigned(count);
+  assigned.set(0);
+  colored[1].set(0);
+
+  for (unsigned labeling = 0; labeling < 2; ++labeling) {
+    check(optimizer.begin(colored, assigned));
+    check(optimizer.group_count() == 2);
+    const auto occupied = optimizer.group_candidates(0);
+    const auto unused = optimizer.group_candidates(1);
+    check(occupied.size() == 1 && unused.size() == sets.size());
+    check((sets.begin() + occupied.front())->test(0));
+    for (size_t index = 0; index < unused.size(); ++index)
+      check(unused[index] == index);
+    std::swap(colored[0], colored[1]);
+  }
+}
+
 void test_pricing_limits() {
   constexpr size_t count = 16;
   std::vector<pbqp::BitSet<>> graph(count, pbqp::BitSet<>(count, true));
@@ -1127,6 +1160,7 @@ extern "C++" void run_bnb_bounds_tests() {
   test_maximal_sets();
   test_maximal_bipartite_bound();
   test_maximal_budgets();
+  test_prefix_pricing_color_gap();
   test_pricing_limits();
   test_price_quantization();
   test_bitsets<unsigned char>();
