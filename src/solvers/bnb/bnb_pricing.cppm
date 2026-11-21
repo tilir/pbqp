@@ -24,6 +24,7 @@ module;
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <span>
 #include <utility>
 #include <vector>
 module pbqp:bnb_pricing;
@@ -56,7 +57,7 @@ class PriceOptimizer {
   double score_patterns(const std::vector<double> &values);
   void prepare_gradient(double temperature);
   void update(double step, double momentum);
-  void relax(double temperature);
+  void relax(double temperature, size_t steps);
 
 public:
   static constexpr size_t iterations = 500;
@@ -72,7 +73,7 @@ public:
 
   size_t iterations_used() const noexcept { return used_iterations; }
 
-  PriceResult run();
+  PriceResult run(size_t steps);
 
   const std::vector<double> &prices() const noexcept { return x; }
 };
@@ -119,14 +120,14 @@ void PriceOptimizer::update(double step, double momentum) {
   x.swap(next);
 }
 
-void PriceOptimizer::relax(double temperature) {
+void PriceOptimizer::relax(double temperature, size_t steps) {
   y = x;
   double t = 1;
   // Hessian(log-sum-exp_T) = Cov(incidence(I)) / T, whose norm is at most
   // alpha/T for alpha=max |I|. Thus -F_T has L <= R*alpha/T; use step 1/L.
   double step =
       temperature / (static_cast<double>(registers) * sets.maximum_size());
-  for (size_t iteration = 0; iteration < iterations; ++iteration) {
+  for (size_t iteration = 0; iteration < steps; ++iteration) {
     if (deadline.expired())
       return;
     ++used_iterations;
@@ -138,9 +139,17 @@ void PriceOptimizer::relax(double temperature) {
   }
 }
 
-PriceResult PriceOptimizer::run() {
+PriceResult PriceOptimizer::run(size_t steps) {
+  // A uniform feasible starting point preserves the cardinality signal
+  // on short schedules before the optimizer can discover good weights.
+  if (steps < iterations) {
+    const auto nodes = std::span(problem.nodes, problem.num_nodes);
+    const auto cheapest = std::ranges::min_element(
+        nodes, {}, [](const pbqp_node &node) { return node.costs[0]; });
+    std::fill(x.begin(), x.end(), cheapest->costs[0]);
+  }
   for (double temperature : temperatures) {
-    relax(temperature);
+    relax(temperature, steps);
     if (deadline.expired())
       return PriceResult::Interrupted;
     // Check the hard objective F(x), not the smoothed surrogate. This only
@@ -152,7 +161,8 @@ PriceResult PriceOptimizer::run() {
     // Stop investing in pricing; ordinary and unweighted bounds remain valid.
     if (!std::isfinite(total) || !std::isfinite(maximum))
       return PriceResult::NonFinite;
-    if (total <= registers * maximum)
+    if (total <= registers * maximum &&
+        (steps == iterations || temperature == temperatures.back()))
       return PriceResult::NonPositive;
   }
   return PriceResult::Useful;
@@ -242,7 +252,7 @@ private:
 
 public:
   void prepare(const pbqp_problem &problem, const IndependentSets &patterns,
-               Deadline deadline = Deadline{});
+               Deadline deadline = Deadline{}, bool budgeted = false);
 
   PricingStatus status() const noexcept { return state; }
 
@@ -263,7 +273,7 @@ public:
 
 void RegallocPricing::prepare(const pbqp_problem &problem,
                               const IndependentSets &patterns,
-                              Deadline deadline) {
+                              Deadline deadline, bool budgeted) {
   if (ready())
     return;
   if (!patterns.complete()) {
@@ -282,12 +292,20 @@ void RegallocPricing::prepare(const pbqp_problem &problem,
       return;
     }
   }
-  if (patterns.num_entries() > visit_budget / vertex_passes) {
+  // Each temperature uses two catalogue passes per iteration and one
+  // hard-objective check. Give every stage the same affordable step count.
+  const size_t passes_per_stage = visit_budget / patterns.num_entries() /
+                                  PriceOptimizer::temperatures.size();
+  const size_t steps =
+      passes_per_stage > 1
+          ? std::min(PriceOptimizer::iterations, (passes_per_stage - 1) / 2)
+          : 0;
+  if (!steps || (!budgeted && steps < PriceOptimizer::iterations)) {
     state = PricingStatus::VisitBudget;
     return;
   }
   PriceOptimizer optimizer(problem, patterns, deadline);
-  auto result = optimizer.run();
+  auto result = optimizer.run(steps);
   used_iterations = optimizer.iterations_used();
   if (result == PriceResult::Interrupted)
     return;

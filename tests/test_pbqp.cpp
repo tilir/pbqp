@@ -489,7 +489,8 @@ void check_reference(const pbqp_problem &p) {
       "greedy-seed",        "reduction-seed",   "prefix-planning",
       "work-donation",      "structural-order", "clique-bounds",
       "cardinality-bounds", "weighted-bounds",  "repricing",
-      "cover-seed",         "dsatur-seed"};
+      "cover-seed",         "dsatur-seed",      "shared-unused-capacity",
+      "budgeted-pricing"};
   for (auto name : optimization_names)
     for (bool enabled : {false, true}) {
       auto configured = [&](const pbqp_problem *input,
@@ -508,6 +509,7 @@ void check_reference(const pbqp_problem &p) {
   // Exercise interactions beyond one-at-a-time ablations on the same oracle.
   const std::vector<std::vector<const char *>> combinations{
       {"weighted-bounds", "repricing"},
+      {"weighted-bounds", "budgeted-pricing", "shared-unused-capacity"},
       {"structural-order", "clique-bounds"},
       {"option-order", "greedy-seed", "register-symmetry",
        "cardinality-bounds"},

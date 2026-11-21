@@ -342,7 +342,8 @@ endif()
 set(disabled_optimizations)
 foreach(name option-order forward-checking register-symmetry greedy-seed
     reduction-seed prefix-planning work-donation structural-order clique-bounds
-    cardinality-bounds weighted-bounds repricing cover-seed)
+    cardinality-bounds weighted-bounds repricing cover-seed dsatur-seed
+    shared-unused-capacity budgeted-pricing)
   list(APPEND disabled_optimizations "-fno-${name}")
 endforeach()
 run(0 "${PBQP}" --solve=bnbopt -O2 ${disabled_optimizations} "${EXAMPLE}")

@@ -1,6 +1,6 @@
 # PBQP
 
-A PBQP library with C API 2.3, a C++23 interface, and Python/Ruby bindings.
+A PBQP library with C API 2.4, a C++23 interface, and Python/Ruby bindings.
 Reads PBQP 1/2, writes compact PBQP 2, and solves with exact and heuristic algorithms.
 
 Requires CMake 3.28 or newer, Ninja, Clang 21.1 with `clang-scan-deps`,

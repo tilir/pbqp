@@ -383,7 +383,7 @@ void test_prefix_high_register() {
 void test_prefix_pricing_budget() {
   context = "prefix candidate budget retains root capacity";
   constexpr size_t half = 75, count = 2 * half, registers = 65;
-  constexpr size_t regular_neighbors = 13, extra_vertices = 50;
+  constexpr size_t complement_degree = 14;
   std::vector<pbqp_cost_t> unary(registers + 1);
   unary[0] = 1;
   std::vector<pbqp_node> nodes(count, pbqp_node{registers + 1, unary.data()});
@@ -391,15 +391,14 @@ void test_prefix_pricing_budget() {
   for (size_t color = 1; color <= registers; ++color)
     matrix[color * (registers + 1) + color] = PBQP_INF;
   std::vector<pbqp_edge> edges;
-  // The complement is bipartite with exactly 1025 edges and no isolated
+  // The complement is bipartite with exactly 1050 edges and no isolated
   // vertices. Its edges are exactly the maximal independent pairs of PBQP.
   for (size_t src = 0; src < count; ++src)
     for (size_t tgt = src + 1; tgt < count; ++tgt) {
       bool pair = false;
       if (src < half && tgt >= half) {
         const size_t offset = (tgt - half + half - src) % half;
-        pair = offset < regular_neighbors ||
-               (offset == regular_neighbors && src < extra_vertices);
+        pair = offset < complement_degree;
       }
       if (!pair)
         edges.push_back({src, tgt, matrix.data()});
@@ -408,8 +407,15 @@ void test_prefix_pricing_budget() {
   pbqp::BranchAndBoundBounds bounds(problem);
   bounds.prepare_search();
   bounds.prepare_capacity();
-  check(bounds.patterns().complete() && bounds.patterns().size() == 1025);
+  check(bounds.patterns().complete() &&
+        bounds.patterns().size() == half * complement_degree);
   check(bounds.weights().ready());
+  check(bounds.weights().iterations_used() > 0);
+  check(bounds.weights().iterations_used() <
+        pbqp::RegallocPricing::maximum_iterations);
+  pbqp::RegallocPricing full_schedule;
+  full_schedule.prepare(problem, bounds.patterns());
+  check(full_schedule.status() == pbqp::PricingStatus::VisitBudget);
   check(bounds.prefix_pricing_plan().status ==
         pbqp::PrefixPricingStatus::CandidateBudget);
   pbqp::BranchAndBoundBounds::Workspace workspace(bounds);

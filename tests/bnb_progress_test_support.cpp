@@ -129,8 +129,9 @@ void test_filtered_children() {
       while (worker.active()) {
         worker.chunk(quota, pending);
         if (quota == 1 && log.count && first) {
-          // The first real leaf carries 1 / (2 * 3 * 2 * 2), not 98%.
-          check(log.count == 4);
+          // The first update is the completed root lookahead: one of
+          // five levels including the leaves.
+          check(log.count == 20);
           first = false;
         }
       }
@@ -228,8 +229,8 @@ void test_new_incumbent() {
   while (!worker.chunk(1, observer)) {
   }
   observer.pending.flush();
-  check(observer.skipped == 1 && observer.work == 0);
-  check(log.count == 0 && bounds.checked_at_most_once());
+  check(observer.skipped == 0.8 && observer.work == 0.2);
+  check(log.count == 99 && bounds.checked_at_most_once());
   progress.finish();
   check(log.count == 100 && !log.invalid);
 }

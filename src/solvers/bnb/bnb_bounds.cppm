@@ -174,7 +174,8 @@ public:
     if (deadline.expired())
       return;
     if (optimizations.enabled(BnbOptimization::WeightedBounds))
-      pricing.prepare(input(), independent, deadline);
+      pricing.prepare(input(), independent, deadline,
+                      optimizations.enabled(BnbOptimization::BudgetedPricing));
     if (deadline.expired())
       return;
     if (optimizations.enabled(BnbOptimization::WeightedBounds) &&
@@ -330,7 +331,19 @@ bool BranchAndBoundBounds::capacity_bound(bool weighted, Workspace &workspace,
     total += capacity_weight(weighted, workspace, id);
   if (!total)
     return true;
+  const bool share =
+      optimizations.enabled(BnbOptimization::SharedUnusedCapacity);
+  bool cached_unused = false;
+  size_t unused_best = 0;
   for (size_t color = 0; color < registers(); ++color) {
+    const bool unused = share && (color >= workspace.colored.size() ||
+                                  !workspace.colored[color].any());
+    if (unused && cached_unused) {
+      if (unused_best >= total - capacity)
+        return true;
+      capacity += unused_best;
+      continue;
+    }
     size_t best = 0;
     // Every independent extension lies in a maximal independent superset.
     // Intersecting with allowed pending nodes preserves that extension, and
@@ -344,6 +357,12 @@ bool BranchAndBoundBounds::capacity_bound(bool weighted, Workspace &workspace,
         if (pending.test(id) && workspace.allowed[id].test(color))
           available += capacity_weight(weighted, workspace, id);
       best = std::max(best, available);
+    }
+    // Forward checking only removes colors present at fixed neighbors.
+    // All unused colors thus have identical admissible pending vertices.
+    if (unused) {
+      cached_unused = true;
+      unused_best = best;
     }
     if (best >= total - capacity)
       return true;

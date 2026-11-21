@@ -483,10 +483,13 @@ With heartbeat enabled, each worker performs one-level lookahead before
 entering a node's children. It checks each child's bound and keeps only children
 which are feasible under the constraints and can still improve the incumbent.
 Infeasible children, noncanonical register names, and immediate `L >= G` cuts
-receive no weight. The node's weight is divided equally among surviving children,
-rather than among every original option. If no child survives, the searched node
-closes with its whole weight. Child bounds are cached: entering a surviving child
-rechecks the latest incumbent, without evaluating that bound again.
+receive no weight. Completed lookahead takes one level's share of the node's
+weight (one divided by the number of remaining levels including the current
+node). This lets long paths with few surviving choices report their bound
+checks before reaching a leaf. The rest is divided equally among surviving
+children. If no child survives, the searched node closes with its whole weight.
+Entering a surviving child reuses its cached bound and checks it against the
+latest incumbent.
 
 The surviving initial frontier jobs start with equal weights; prefixes already
 closed during planning contribute nothing. An initial or donated job rejected
@@ -494,7 +497,7 @@ on arrival (including a range with no surviving children) is removed from the
 denominator, as is a cached child closed on entry by a newer incumbent.
 Donation transfers the unexplored siblings' weights to the receiving
 worker and removes those siblings from the donor. Completed weights are merged
-in batches of 256 closures or immediately for a weight of at least 0.01.
+in batches of 256 progress updates or immediately for a weight of at least 0.01.
 
 These are **approximate percentages**, not a count of all DFS nodes or a promise
 that equal percentages take equal time. Children and frontier jobs may contain

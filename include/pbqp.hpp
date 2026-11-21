@@ -1,5 +1,5 @@
 /*
- * C++23 conveniences over C API 2.3: RAII problems, vector solutions, spans,
+ * C++23 conveniences over C API 2.4: RAII problems, vector solutions, spans,
  * typed solver selection, callbacks, and exceptions preserving C diagnostics.
  * This header does not expose implementation modules or solver internals.
  *
@@ -8,7 +8,7 @@
  */
 #pragma once
 /** @file pbqp.hpp
- * @brief Public C++23 wrapper over C API 2.3.
+ * @brief Public C++23 wrapper over C API 2.4.
  */
 #include "pbqp.h"
 #include <cstddef>

@@ -39,6 +39,8 @@ invalid values still fail.
 | `cardinality-bounds` | O2 | Use global unweighted capacity from complete maximal independent sets. |
 | `weighted-bounds` | O2 | Prepare root prices and use auxiliary integer-weight capacities. |
 | `repricing` | O2 | Refine those weights for selected fixed prefixes. Requires `weighted-bounds`. |
+| `shared-unused-capacity` | O2 | Reuse the catalogue maximum across unused registers in cardinality and weighted capacity bounds. |
+| `budgeted-pricing` | O2 | Shorten the root pricing schedule when the full schedule exceeds the catalogue visit budget. |
 | `cover-seed` | O2 | Seed an incumbent by bounded independent-set coverage. |
 | `dsatur-seed` | O2 | Try bounded DSATUR/tabu and spill repair before reduction and structural preparation. |
 
@@ -85,8 +87,19 @@ map contract and the [programmer's guide](programmers_guide.md) for examples.
 Each file under [individual examples](../examples/pbqp/individual) contains a
 graph, two commands that differ by one flag, and measured outcomes. Run the
 commands from the repository root. Both commands use the same profile, thread
-limit, and deadline. The timings illustrate these particular inputs and depend
-on the machine and, for parallel cases, worker scheduling.
+limit, and deadline. New examples must show a measured speedup with both
+configurations proving the same optimum. The timings depend on the input,
+the machine and, for parallel cases, worker scheduling.
+
+Unused registers have identical pending domains and no fixed vertices, so their
+capacity maxima can be computed with one catalogue scan. The bound and
+reference-order spill DP retain the same semantics.
+
+Budgeted pricing divides the available catalogue passes evenly among the four
+temperature stages, reserving one pass per stage to score the result. A short
+schedule starts from a uniform feasible price equal to the cheapest spill.
+Quantized weights still require a capacity check against the whole catalogue.
+With the flag disabled, an unaffordable full schedule skips root pricing.
 
 ## Applicability at a glance
 

@@ -5,7 +5,7 @@
  * and edge matrix entries. Missing edges contribute zero; INF forbids a node
  * option or a pair. This header defines the in-memory format, min-plus
  * cost algebra, text I/O, ownership helpers, and exact/heuristic solvers.
- * C API version 2.3 is described in doc/c_api.md. The implementation uses
+ * C API version 2.4 is described in doc/c_api.md. The implementation uses
  * C++23; all public declarations are C-compatible. See doc/format.md for the
  * PBQP 1/2 text formats.
  *
@@ -20,7 +20,7 @@
 #pragma once
 
 /** @file pbqp.h
- * @brief Stable C API 2.3 for PBQP data, file I/O, and solvers.
+ * @brief Stable C API 2.4 for PBQP data, file I/O, and solvers.
  */
 
 /** @mainpage PBQP API reference
@@ -46,8 +46,8 @@ extern "C" {
  * Text-format versions are independent of the C API version. */
 enum {
   PBQP_API_VERSION_MAJOR = 2, /**< Breaking compatibility version. */
-  PBQP_API_VERSION_MINOR = 3, /**< Compatible API additions. */
-  PBQP_API_VERSION_PATCH = 1  /**< Compatible fixes. */
+  PBQP_API_VERSION_MINOR = 4, /**< Compatible API additions. */
+  PBQP_API_VERSION_PATCH = 0  /**< Compatible fixes. */
 };
 
 /** Runtime API version; independent of the PBQP text format version. */
@@ -338,7 +338,8 @@ typedef struct pbqp_option {
  * - BOOL overrides: "option-order", "forward-checking", "register-symmetry",
  *   "greedy-seed", "reduction-seed", "prefix-planning", "work-donation",
  *   "structural-order", "clique-bounds", "cardinality-bounds",
- *   "weighted-bounds", "repricing", "cover-seed", "dsatur-seed". Overrides
+ *   "weighted-bounds", "repricing", "cover-seed", "dsatur-seed",
+ *   "shared-unused-capacity", "budgeted-pricing". Overrides
  * apply after the profile, independent of map order. Repricing additionally
  * requires weighted bounds. Enabled optimizations still require eligible input
  * and resources.
@@ -475,7 +476,8 @@ pbqp_status pbqp_solve_bruteforce(const pbqp_problem *problem,
  * diagnostics. Otherwise, options control concurrency and optional
  * progress/preparation callbacks. Progress approximates the fraction of the
  * surviving search tree. Immediate infeasibility, symmetry, and bound cuts
- * receive no child weight; remaining children share their parent's weight.
+ * receive no child weight. Completed lookahead takes a share of the weight;
+ * surviving children divide the rest.
  * Initial frontier jobs have equal weights; jobs closed on arrival are
  * excluded. Subtrees can require unequal work, so percentages can pause or
  * advance abruptly and are not an ETA. Notifications obey the serialized

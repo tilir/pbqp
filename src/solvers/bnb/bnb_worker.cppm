@@ -1,7 +1,7 @@
 /*
  * Resumable allocation-free DFS with coarse sibling donation between chunks.
  * A donated range is removed from the donor's cursor limits. The current path
- * stays private; progress records only closed, disjoint prefixes.
+ * stays private; progress accounts for completed lookahead and closed prefixes.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  * Distributed under GNU GPL version 3, WITHOUT ANY WARRANTY.
@@ -118,13 +118,18 @@ template <typename Bounds> class BranchAndBoundWorker {
     state.survivors += child.live;
   }
 
-  void enter_children() noexcept {
+  template <typename Observer> void enter_children(Observer &observe) noexcept {
     auto &state = *lookahead;
     while (!state.children[depth][cursor[depth]].live)
       ++cursor[depth];
     const size_t id = bounds.node(depth);
     tuple[id] = bounds.option(id, cursor[depth]);
-    state.child_weight[depth] = state.weight[depth] / state.survivors;
+    // Charge the completed lookahead as one level of this subtree. A long
+    // single-survivor path then reports work before closing its first branch.
+    const double weight = state.weight[depth];
+    const double scanned = weight / (tuple.size() - depth + 1);
+    observe.completed(scanned);
+    state.child_weight[depth] = (weight - scanned) / state.survivors;
     ++depth;
     state.weight[depth] = state.child_weight[depth - 1];
   }
@@ -149,7 +154,7 @@ template <typename Bounds> class BranchAndBoundWorker {
           continue;
         state.preparing = false;
         if (state.survivors) {
-          enter_children();
+          enter_children(observe);
           continue;
         }
         close_exhausted_node(observe);

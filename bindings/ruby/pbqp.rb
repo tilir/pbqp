@@ -1,4 +1,4 @@
-# Standard-library Fiddle binding for PBQP C API 2.3.
+# Standard-library Fiddle binding for PBQP C API 2.4.
 # SPDX-License-Identifier: GPL-3.0-only
 # See LICENSE for the full license text.
 
