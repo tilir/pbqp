@@ -1,0 +1,50 @@
+# B&B optimization example for clique-bounds.
+# A clique of six needs a spill with five registers. Every spill is forbidden,
+# so the clique bound proves infeasibility without enumerating prefixes.
+# Run from the repository root.
+# Enabled:  ./build-clang-modules/pbqp --solve=bnb -Werror -O0 --numthreads=1 --timeout=0.7 -fclique-bounds examples/pbqp/individual/bnb-clique-bounds.pbqp
+# Baseline: ./build-clang-modules/pbqp --solve=bnb -Werror -O0 --numthreads=1 --timeout=0.7 -fno-clique-bounds examples/pbqp/individual/bnb-clique-bounds.pbqp
+# Observed with Clang 21 Release on Intel Core Ultra X7 358H.
+# Median elapsed CLI time over five alternating runs, including startup.
+# Enabled: 7.8 ms, 5/5 infeasible.
+# Baseline: 707.3 ms, 5/5 timeout.
+
+PBQP 2
+NODES 18
+EDGES 15
+MATRICES 1
+NODE 0 6 INF 0 0 0 0 0
+NODE 1 6 INF 0 0 0 0 0
+NODE 2 6 INF 0 0 0 0 0
+NODE 3 6 INF 0 0 0 0 0
+NODE 4 6 INF 0 0 0 0 0
+NODE 5 6 INF 0 0 0 0 0
+NODE 6 6 INF 0 0 0 0 0
+NODE 7 6 INF 0 0 0 0 0
+NODE 8 6 INF 0 0 0 0 0
+NODE 9 6 INF 0 0 0 0 0
+NODE 10 6 INF 0 0 0 0 0
+NODE 11 6 INF 0 0 0 0 0
+NODE 12 6 INF 0 0 0 0 0
+NODE 13 6 INF 0 0 0 0 0
+NODE 14 6 INF 0 0 0 0 0
+NODE 15 6 INF 0 0 0 0 0
+NODE 16 6 INF 0 0 0 0 0
+NODE 17 6 INF 0 0 0 0 0
+MATRIX 0 6 6 DENSE 0 0 0 0 0 0 0 INF 0 0 0 0 0 0 INF 0 0 0 0 0 0 INF 0 0 0 0 0 0 INF 0 0 0 0 0 0 INF
+EDGE 12 13 0
+EDGE 12 14 0
+EDGE 12 15 0
+EDGE 12 16 0
+EDGE 12 17 0
+EDGE 13 14 0
+EDGE 13 15 0
+EDGE 13 16 0
+EDGE 13 17 0
+EDGE 14 15 0
+EDGE 14 16 0
+EDGE 14 17 0
+EDGE 15 16 0
+EDGE 15 17 0
+EDGE 16 17 0
+END

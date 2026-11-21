@@ -1,0 +1,56 @@
+# B&B optimization example for structural-order.
+# A four-vertex clique needs four registers, but only three are available.
+# Clique-first ordering exposes the contradiction before branching on the
+# isolated vertices.
+# Run from the repository root.
+# Enabled:  ./build-clang-modules/pbqp --solve=bnb -Werror -O0 --numthreads=1 --timeout=0.7 -fstructural-order examples/pbqp/individual/bnb-structural-order.pbqp
+# Baseline: ./build-clang-modules/pbqp --solve=bnb -Werror -O0 --numthreads=1 --timeout=0.7 -fno-structural-order examples/pbqp/individual/bnb-structural-order.pbqp
+# Observed with Clang 21 Release on Intel Core Ultra X7 358H.
+# Median elapsed CLI time over five alternating runs, including startup.
+# Enabled: 7.4 ms, 5/5 infeasible.
+# Baseline: 707.2 ms, 5/5 timeout.
+
+PBQP 2
+NODES 32
+EDGES 6
+MATRICES 1
+NODE 0 4 INF 0 0 0
+NODE 1 4 INF 0 0 0
+NODE 2 4 INF 0 0 0
+NODE 3 4 INF 0 0 0
+NODE 4 4 INF 0 0 0
+NODE 5 4 INF 0 0 0
+NODE 6 4 INF 0 0 0
+NODE 7 4 INF 0 0 0
+NODE 8 4 INF 0 0 0
+NODE 9 4 INF 0 0 0
+NODE 10 4 INF 0 0 0
+NODE 11 4 INF 0 0 0
+NODE 12 4 INF 0 0 0
+NODE 13 4 INF 0 0 0
+NODE 14 4 INF 0 0 0
+NODE 15 4 INF 0 0 0
+NODE 16 4 INF 0 0 0
+NODE 17 4 INF 0 0 0
+NODE 18 4 INF 0 0 0
+NODE 19 4 INF 0 0 0
+NODE 20 4 INF 0 0 0
+NODE 21 4 INF 0 0 0
+NODE 22 4 INF 0 0 0
+NODE 23 4 INF 0 0 0
+NODE 24 4 INF 0 0 0
+NODE 25 4 INF 0 0 0
+NODE 26 4 INF 0 0 0
+NODE 27 4 INF 0 0 0
+NODE 28 4 INF 0 0 0
+NODE 29 4 INF 0 0 0
+NODE 30 4 INF 0 0 0
+NODE 31 4 INF 0 0 0
+MATRIX 0 4 4 DENSE 0 0 0 0 0 INF 0 0 0 0 INF 0 0 0 0 INF
+EDGE 28 29 0
+EDGE 28 30 0
+EDGE 28 31 0
+EDGE 29 30 0
+EDGE 29 31 0
+EDGE 30 31 0
+END

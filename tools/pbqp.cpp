@@ -58,7 +58,7 @@ void help() {
          "  naive   Exhaustive search; proves optimality or infeasibility.\n"
          "  bnb     Exact branch-and-bound; prunes bounded or forbidden "
          "subtrees.\n"
-         "  bnbopt  Exact B&B with structural order and clique bounds.\n"
+         "  bnbopt  Exact B&B with the O2 optimization profile by default.\n"
          "  dsatur  DSATUR/tabu heuristic with greedy fallback.\n"
          "  r1r2rn  R1/R2/RN reduction and backpropagation heuristic.\n"
          "  greedy  Cost-priority heuristic; returns a feasible, possibly "

@@ -80,6 +80,14 @@ selector for all profiles. The open map's SIZE key `optimization-level` selects
 wins, and overrides apply after the profile. See `include/pbqp.h` for the typed
 map contract and the [programmer's guide](programmers_guide.md) for examples.
 
+## Examples for individual flags
+
+Each file under [individual examples](../examples/pbqp/individual) contains a
+graph, two commands that differ by one flag, and measured outcomes. Run the
+commands from the repository root. Both commands use the same profile, thread
+limit, and deadline. The timings illustrate these particular inputs and depend
+on the machine and, for parallel cases, worker scheduling.
+
 ## Applicability at a glance
 
 The scopes below describe what the current implementation enables, not whether

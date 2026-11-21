@@ -1,0 +1,141 @@
+# B&B optimization example for work-donation.
+# Both runs start with one job because O0 disables prefix planning. Donation
+# lets idle workers process siblings while the original worker continues its
+# search.
+# Run from the repository root.
+# Enabled:  ./build-clang-modules/pbqp --solve=bnb -Werror -O0 --numthreads=4 --timeout=0.7 -fwork-donation examples/pbqp/individual/bnb-work-donation.pbqp
+# Baseline: ./build-clang-modules/pbqp --solve=bnb -Werror -O0 --numthreads=4 --timeout=0.7 -fno-work-donation examples/pbqp/individual/bnb-work-donation.pbqp
+# Observed with Clang 21 Release on Intel Core Ultra X7 358H.
+# Median elapsed CLI time over five alternating runs, including startup.
+# Enabled: 11.8 ms, 5/5 optimal, COST 76.0139313.
+# Baseline: 48.0 ms, 5/5 optimal, COST 76.0139313.
+
+PBQP 2
+NODES 16
+EDGES 66
+MATRICES 1
+
+NODE 0 4
+11.2623062 0 0 0
+
+NODE 1 4
+50.4820976 0 0 0
+
+NODE 2 4
+26.4924469 0 0 0
+
+NODE 3 4
+15.1049786 0 0 0
+
+NODE 4 4
+27.2712593 0 0 0
+
+NODE 5 4
+11.1026239 0 0 0
+
+NODE 6 4
+17.6119003 0 0 0
+
+NODE 7 4
+10.0547113 0 0 0
+
+NODE 8 4
+22.0748749 0 0 0
+
+NODE 9 4
+30.7936745 0 0 0
+
+NODE 10 4
+92.0136261 0 0 0
+
+NODE 11 4
+61.878746 0 0 0
+
+NODE 12 4
+93.1482239 0 0 0
+
+NODE 13 4
+12.1955118 0 0 0
+
+NODE 14 4
+78.842598 0 0 0
+
+NODE 15 4
+77.4288254 0 0 0
+
+MATRIX 0 4 4 SPARSE 0 3
+1 1 INF
+2 2 INF
+3 3 INF
+
+EDGE 0 2 0
+EDGE 0 3 0
+EDGE 0 4 0
+EDGE 0 5 0
+EDGE 0 9 0
+EDGE 0 12 0
+EDGE 0 13 0
+EDGE 0 15 0
+EDGE 1 2 0
+EDGE 1 5 0
+EDGE 1 9 0
+EDGE 1 11 0
+EDGE 1 12 0
+EDGE 1 14 0
+EDGE 2 3 0
+EDGE 2 4 0
+EDGE 2 6 0
+EDGE 2 8 0
+EDGE 2 9 0
+EDGE 2 10 0
+EDGE 2 11 0
+EDGE 2 12 0
+EDGE 2 13 0
+EDGE 2 14 0
+EDGE 2 15 0
+EDGE 3 5 0
+EDGE 3 7 0
+EDGE 3 10 0
+EDGE 3 11 0
+EDGE 3 12 0
+EDGE 3 13 0
+EDGE 3 14 0
+EDGE 4 6 0
+EDGE 4 8 0
+EDGE 4 10 0
+EDGE 4 11 0
+EDGE 4 12 0
+EDGE 4 13 0
+EDGE 4 14 0
+EDGE 4 15 0
+EDGE 5 6 0
+EDGE 5 11 0
+EDGE 6 7 0
+EDGE 6 9 0
+EDGE 6 10 0
+EDGE 6 11 0
+EDGE 6 12 0
+EDGE 6 13 0
+EDGE 6 14 0
+EDGE 7 9 0
+EDGE 7 12 0
+EDGE 7 13 0
+EDGE 7 14 0
+EDGE 8 12 0
+EDGE 8 13 0
+EDGE 8 14 0
+EDGE 9 13 0
+EDGE 10 13 0
+EDGE 10 14 0
+EDGE 11 12 0
+EDGE 11 13 0
+EDGE 12 14 0
+EDGE 12 15 0
+EDGE 13 14 0
+EDGE 13 15 0
+EDGE 14 15 0
+
+END
+# generator: pbqp_generate 2.3.1+ca66b365ba99ccd8530dacdfddf9f87d365226a72ceb79fcec4b0f18ee7c8680
+# random: mt19937_64; sampling protocol 1
+# command: ./build-clang-modules/pbqp_generate --mode=regalloc --nodes=16 --registers=3 --edges=66 --seed=1 --output=/tmp/pbqp-ind/reg-16-3-0.55-1.pbqp

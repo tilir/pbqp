@@ -1,0 +1,46 @@
+# B&B optimization example for reduction-seed.
+# Greedy fixes node 0 to option 0 and pays 1 for the resulting late pair. R2
+# accounts for that pair and finds cost 0, which closes the root.
+# Run from the repository root.
+# Enabled:  ./build-clang-modules/pbqp --solve=bnb -Werror -O0 -fgreedy-seed --numthreads=1 --timeout=0.7 -freduction-seed examples/pbqp/individual/bnb-reduction-seed.pbqp
+# Baseline: ./build-clang-modules/pbqp --solve=bnb -Werror -O0 -fgreedy-seed --numthreads=1 --timeout=0.7 -fno-reduction-seed examples/pbqp/individual/bnb-reduction-seed.pbqp
+# Observed with Clang 21 Release on Intel Core Ultra X7 358H.
+# Median elapsed CLI time over five alternating runs, including startup.
+# Enabled: 7.5 ms, 5/5 optimal, COST 0.
+# Baseline: 708.1 ms, 5/5 timeout.
+
+PBQP 2
+NODES 25
+EDGES 3
+MATRICES 2
+NODE 0 3 0 0 10
+NODE 1 2 0 0
+NODE 2 2 0 0
+NODE 3 2 0 0
+NODE 4 2 0 0
+NODE 5 2 0 0
+NODE 6 2 0 0
+NODE 7 2 0 0
+NODE 8 2 0 0
+NODE 9 2 0 0
+NODE 10 2 0 0
+NODE 11 2 0 0
+NODE 12 2 0 0
+NODE 13 2 0 0
+NODE 14 2 0 0
+NODE 15 2 0 0
+NODE 16 2 0 0
+NODE 17 2 0 0
+NODE 18 2 0 0
+NODE 19 2 0 0
+NODE 20 2 0 0
+NODE 21 2 0 0
+NODE 22 2 0 0
+NODE 23 2 0 0
+NODE 24 2 0 0
+MATRIX 0 3 2 DENSE INF 0 0 INF 0 INF
+MATRIX 1 2 2 DENSE 0 0 0 1
+EDGE 0 23 0
+EDGE 0 24 0
+EDGE 23 24 1
+END

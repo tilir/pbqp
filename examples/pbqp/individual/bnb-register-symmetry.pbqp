@@ -1,0 +1,73 @@
+# B&B optimization example for register-symmetry.
+# A ten-vertex clique needs ten distinct colors. With nine registers and
+# forbidden spills, canonical register naming avoids exploring permutations of
+# equivalent assignments.
+# Run from the repository root.
+# Enabled:  ./build-clang-modules/pbqp --solve=bnb -Werror -O0 --numthreads=1 --timeout=0.7 -fregister-symmetry examples/pbqp/individual/bnb-register-symmetry.pbqp
+# Baseline: ./build-clang-modules/pbqp --solve=bnb -Werror -O0 --numthreads=1 --timeout=0.7 -fno-register-symmetry examples/pbqp/individual/bnb-register-symmetry.pbqp
+# Observed with Clang 21 Release on Intel Core Ultra X7 358H.
+# Median elapsed CLI time over five alternating runs, including startup.
+# Enabled: 4.4 ms, 5/5 infeasible.
+# Baseline: 704.6 ms, 1/5 infeasible, 4/5 timeout.
+
+PBQP 2
+NODES 10
+EDGES 45
+MATRICES 1
+NODE 0 10 INF 0 0 0 0 0 0 0 0 0
+NODE 1 10 INF 0 0 0 0 0 0 0 0 0
+NODE 2 10 INF 0 0 0 0 0 0 0 0 0
+NODE 3 10 INF 0 0 0 0 0 0 0 0 0
+NODE 4 10 INF 0 0 0 0 0 0 0 0 0
+NODE 5 10 INF 0 0 0 0 0 0 0 0 0
+NODE 6 10 INF 0 0 0 0 0 0 0 0 0
+NODE 7 10 INF 0 0 0 0 0 0 0 0 0
+NODE 8 10 INF 0 0 0 0 0 0 0 0 0
+NODE 9 10 INF 0 0 0 0 0 0 0 0 0
+MATRIX 0 10 10 DENSE 0 0 0 0 0 0 0 0 0 0 0 INF 0 0 0 0 0 0 0 0 0 0 INF 0 0 0 0 0 0 0 0 0 0 INF 0 0 0 0 0 0 0 0 0 0 INF 0 0 0 0 0 0 0 0 0 0 INF 0 0 0 0 0 0 0 0 0 0 INF 0 0 0 0 0 0 0 0 0 0 INF 0 0 0 0 0 0 0 0 0 0 INF 0 0 0 0 0 0 0 0 0 0 INF
+EDGE 0 1 0
+EDGE 0 2 0
+EDGE 0 3 0
+EDGE 0 4 0
+EDGE 0 5 0
+EDGE 0 6 0
+EDGE 0 7 0
+EDGE 0 8 0
+EDGE 0 9 0
+EDGE 1 2 0
+EDGE 1 3 0
+EDGE 1 4 0
+EDGE 1 5 0
+EDGE 1 6 0
+EDGE 1 7 0
+EDGE 1 8 0
+EDGE 1 9 0
+EDGE 2 3 0
+EDGE 2 4 0
+EDGE 2 5 0
+EDGE 2 6 0
+EDGE 2 7 0
+EDGE 2 8 0
+EDGE 2 9 0
+EDGE 3 4 0
+EDGE 3 5 0
+EDGE 3 6 0
+EDGE 3 7 0
+EDGE 3 8 0
+EDGE 3 9 0
+EDGE 4 5 0
+EDGE 4 6 0
+EDGE 4 7 0
+EDGE 4 8 0
+EDGE 4 9 0
+EDGE 5 6 0
+EDGE 5 7 0
+EDGE 5 8 0
+EDGE 5 9 0
+EDGE 6 7 0
+EDGE 6 8 0
+EDGE 6 9 0
+EDGE 7 8 0
+EDGE 7 9 0
+EDGE 8 9 0
+END
