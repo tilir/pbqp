@@ -340,7 +340,7 @@ int main(void) {
   if (version.major != PBQP_API_VERSION_MAJOR ||
       version.minor != PBQP_API_VERSION_MINOR ||
       version.patch != PBQP_API_VERSION_PATCH || version.major != 2 ||
-      version.minor != 5 || version.patch != 0)
+      version.minor != 6 || version.patch != 0)
     return 1;
   pbqp_cost_t costs[] = {4, -2};
   pbqp_node node = {2, costs};

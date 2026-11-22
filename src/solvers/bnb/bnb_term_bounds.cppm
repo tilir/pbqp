@@ -105,7 +105,8 @@ BranchAndBoundTermBounds::BranchAndBoundTermBounds(const pbqp_problem &p,
   prepare_edge_minima();
   if (optimizations.structural() ||
       optimizations.enabled(BnbOptimization::RegisterSymmetry) ||
-      optimizations.enabled(BnbOptimization::DsaturSeed))
+      optimizations.enabled(BnbOptimization::DsaturSeed) ||
+      optimizations.enabled(BnbOptimization::BucketSeed))
     interference = check_interference_structure(problem);
   else
     interference.failure = InterferenceFailure::Disabled;

@@ -41,6 +41,7 @@ invalid values still fail.
 | `repricing` | O2 | Refine those weights for selected fixed prefixes. Requires `weighted-bounds`. |
 | `shared-unused-capacity` | O2 | Reuse the catalogue maximum across unused registers in cardinality and weighted capacity bounds. |
 | `budgeted-pricing` | O2 | Shorten the root pricing schedule when the full schedule exceeds the catalogue visit budget. |
+| `bucket-seed` | O2 | Reoptimize small neighborhoods around the initial incumbent before prefix planning. |
 | `cover-seed` | O2 | Seed an incumbent by bounded independent-set coverage. |
 | `dsatur-seed` | O2 | Try bounded DSATUR/tabu and spill repair before reduction and structural preparation. |
 
@@ -117,6 +118,7 @@ a graph algorithm could theoretically be reused elsewhere:
 | --- | --- |
 | Reference-order evaluation; unary/row/matrix minima; general matrix-based forward checking | Generic, shared by `bnb` and the `bnbopt` fallback. |
 | Cheap root checks and greedy/reduction incumbents | Generic, shared by both solvers. |
+| Bucket neighborhood seed | Generic conditioned search, with a model-dependent rule for choosing spill neighborhoods. |
 | Prefix planning, cached-bound priorities, resumable DFS, sibling donation, oneTBB dispatch, and approximate search-tree progress | Generic search machinery, shared by both solvers; the supplied bounds strategy determines its estimates. |
 | DSATUR/tabu incumbent | Model-dependent, available on any profile via `dsatur-seed`; independent of clique/capacity preparation and catalogue limits. |
 | Canonical register naming | Model-dependent and shared; requires verified interchangeable registers, not prepared clique/capacity data. |
@@ -831,3 +833,27 @@ adaptations and correctness arguments are given in the preceding sections.
    [*Using tabu search techniques for graph coloring*](https://doi.org/10.1007/BF02239976).
    *Computing*, 39:345–351, 1987.
    Source of tabu local search for fixed-color graph coloring.
+
+
+## Bucket neighborhood seed
+
+After the earlier seeds and root-bound checks, B&B may fix all variables
+outside a small neighborhood to the current incumbent. Generic PBQP tries
+edge endpoints, ranked by the current costs of the edge and its endpoints.
+For verified pure interference, the seed tries spilled vertices in descending
+spill-cost order. A neighborhood contains the spill and up to three neighbors
+blocking one register.
+
+Fixed/free edge slices are folded into free unary costs. Forbidden options
+are removed before sizing the tables. The bucket assignment is expanded
+to original option IDs and evaluated against the original problem in
+reference order. Only a strictly cheaper feasible assignment is published.
+The seed contributes an upper bound for the usual incumbent comparison.
+
+The seed remains single-threaded and honors the exact call's deadline.
+It examines at most 96 neighborhoods in four rounds. The kernel budget
+is at most 2,097,152 candidate combinations across its neighborhoods, with
+65,536 factor entries per neighborhood. Selected variables have at most
+256 input options, and rebuilding and conditioning share a 4,194,304-visit
+budget over nodes and edges. The [individual example](../examples/pbqp/individual/bnb-bucket-seed.pbqp)
+compares with and without this flag on O1, with the other settings held fixed.

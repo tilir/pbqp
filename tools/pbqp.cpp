@@ -26,13 +26,13 @@
 import pbqp.command_line;
 
 namespace {
-constexpr std::array<std::string_view, 16> optimization_names{
+constexpr std::array<std::string_view, 17> optimization_names{
     "option-order",       "forward-checking", "register-symmetry",
     "greedy-seed",        "reduction-seed",   "prefix-planning",
     "work-donation",      "structural-order", "clique-bounds",
     "cardinality-bounds", "weighted-bounds",  "repricing",
     "cover-seed",         "dsatur-seed",      "shared-unused-capacity",
-    "budgeted-pricing"};
+    "budgeted-pricing",   "bucket-seed"};
 
 void help() {
   std::cout

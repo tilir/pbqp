@@ -80,6 +80,14 @@ run(0 "${PBQP}" --solve=bnbopt --verbose "${WORK}/verbose-general.pbqp")
 contains("${error}" "matrix entry [1,1]=-3")
 contains("${error}" "generic PBQP bounds")
 
+run(0 "${PBQP}" --solve=bnb -O1 --verbose -Werror -fbucket-seed
+    "${BUCKET_SEED_EXAMPLE}")
+contains("${output}" "COST 71")
+contains("${error}" "cost=73 -> 71")
+contains("${error}" "result quality: optimal")
+run(0 "${PBQP}" --solve=bnbopt --verbose "${BUCKET_SEED_EXAMPLE}")
+contains("${error}" "options: bucket-seed=enabled")
+
 run(0 "${PBQP}" --solve=r1r2rn "${BUCKET_EXAMPLE}")
 contains("${output}" "COST 103")
 set(reduction_output "${output}")
@@ -383,7 +391,7 @@ set(disabled_optimizations)
 foreach(name option-order forward-checking register-symmetry greedy-seed
     reduction-seed prefix-planning work-donation structural-order clique-bounds
     cardinality-bounds weighted-bounds repricing cover-seed dsatur-seed
-    shared-unused-capacity budgeted-pricing)
+    shared-unused-capacity budgeted-pricing bucket-seed)
   list(APPEND disabled_optimizations "-fno-${name}")
 endforeach()
 run(0 "${PBQP}" --solve=bnbopt -O2 ${disabled_optimizations} "${EXAMPLE}")

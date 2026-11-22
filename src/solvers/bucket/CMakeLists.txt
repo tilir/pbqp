@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # See LICENSE for the full license text.
 
-set(PBQP_COMPONENT_MODULES bucket_plan.cppm bucket.cppm)
+set(PBQP_COMPONENT_MODULES bucket_plan.cppm bucket.cppm bucket_residual.cppm)
 list(TRANSFORM PBQP_COMPONENT_MODULES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 list(APPEND PBQP_LIBRARY_MODULES ${PBQP_COMPONENT_MODULES})
 pbqp_register_format_sources(${PBQP_COMPONENT_MODULES})

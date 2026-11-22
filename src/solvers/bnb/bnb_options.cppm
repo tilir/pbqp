@@ -28,7 +28,8 @@ enum class BnbOptimization : unsigned {
   CoverSeed = 1u << 12,
   DsaturSeed = 1u << 13,
   SharedUnusedCapacity = 1u << 14,
-  BudgetedPricing = 1u << 15
+  BudgetedPricing = 1u << 15,
+  BucketSeed = 1u << 16
 };
 
 enum class BnbProfile { O0, O1, O2 };
@@ -43,6 +44,8 @@ constexpr std::array bnb_optimizations{
     BnbOptimizationInfo{"shared-unused-capacity",
                         BnbOptimization::SharedUnusedCapacity},
     BnbOptimizationInfo{"budgeted-pricing", BnbOptimization::BudgetedPricing},
+    BnbOptimizationInfo{"bucket-seed", BnbOptimization::BucketSeed,
+                        BnbProfile::O2},
     BnbOptimizationInfo{"dsatur-seed", BnbOptimization::DsaturSeed},
     BnbOptimizationInfo{"option-order", BnbOptimization::OptionOrder,
                         BnbProfile::O1},

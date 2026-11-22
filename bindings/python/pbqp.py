@@ -1,4 +1,4 @@
-"""Small ctypes binding for PBQP C API 2.5: file I/O, solving, and evaluation.
+"""Small ctypes binding for PBQP C API 2.6: file I/O, solving, and evaluation.
 
 SPDX-License-Identifier: GPL-3.0-only
 See LICENSE for the full license text.

@@ -490,7 +490,7 @@ void check_reference(const pbqp_problem &p) {
       "work-donation",      "structural-order", "clique-bounds",
       "cardinality-bounds", "weighted-bounds",  "repricing",
       "cover-seed",         "dsatur-seed",      "shared-unused-capacity",
-      "budgeted-pricing"};
+      "budgeted-pricing",   "bucket-seed"};
   for (auto name : optimization_names)
     for (bool enabled : {false, true}) {
       auto configured = [&](const pbqp_problem *input,

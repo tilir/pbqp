@@ -5,7 +5,7 @@
  * and edge matrix entries. Missing edges contribute zero; INF forbids a node
  * option or a pair. This header defines the in-memory format, min-plus
  * cost algebra, text I/O, ownership helpers, and exact/heuristic solvers.
- * C API version 2.5 is described in doc/c_api.md. The implementation uses
+ * C API version 2.6 is described in doc/c_api.md. The implementation uses
  * C++23; all public declarations are C-compatible. See doc/format.md for the
  * PBQP 1/2 text formats.
  *
@@ -20,7 +20,7 @@
 #pragma once
 
 /** @file pbqp.h
- * @brief Stable C API 2.5 for PBQP data, file I/O, and solvers.
+ * @brief Stable C API 2.6 for PBQP data, file I/O, and solvers.
  */
 
 /** @mainpage PBQP API reference
@@ -46,7 +46,7 @@ extern "C" {
  * Text-format versions are independent of the C API version. */
 enum {
   PBQP_API_VERSION_MAJOR = 2, /**< Breaking compatibility version. */
-  PBQP_API_VERSION_MINOR = 5, /**< Compatible API additions. */
+  PBQP_API_VERSION_MINOR = 6, /**< Compatible API additions. */
   PBQP_API_VERSION_PATCH = 0  /**< Compatible fixes. */
 };
 
@@ -339,7 +339,7 @@ typedef struct pbqp_option {
  *   "greedy-seed", "reduction-seed", "prefix-planning", "work-donation",
  *   "structural-order", "clique-bounds", "cardinality-bounds",
  *   "weighted-bounds", "repricing", "cover-seed", "dsatur-seed",
- *   "shared-unused-capacity", "budgeted-pricing". Overrides
+ *   "shared-unused-capacity", "budgeted-pricing", "bucket-seed". Overrides
  * apply after the profile, independent of map order. Repricing additionally
  * requires weighted bounds. Enabled optimizations still require eligible input
  * and resources.

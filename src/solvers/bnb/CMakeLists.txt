@@ -8,6 +8,7 @@ set(PBQP_COMPONENT_MODULES
   bnb_bounds.cppm
   bnb_term_bounds.cppm
   bnb_cover.cppm
+  bnb_bucket_seed.cppm
   bnb_prefix_pricing.cppm
   bnb_pricing.cppm
   bnb_diagnostics.cppm

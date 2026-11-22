@@ -106,7 +106,7 @@ algorithm and induced-width complexity.
 with four options per variable. The chosen order has induced width five, so
 the largest intermediate factor has 1,024 entries. Both bucket and B&B O2
 prove a cost of 93. The grid's arbitrary pairwise costs leave B&B with
-generic bounds, whose preliminary interval is [20, 103] on this example.
+generic bounds, whose preliminary interval is [20, 94] on this example with the O2 neighborhood seed.
 
 ## Branch-and-bound
 

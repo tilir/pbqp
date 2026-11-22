@@ -9,7 +9,7 @@
 # Both solvers prove COST 93. The induced width is 5.
 # Clang 21 Release, Intel Core Ultra X7 358H, 16-thread limit.
 # Median of five alternating CLI runs including startup:
-# bucket 7.22 ms; bnbopt 4.86 s.
+# bucket 5.43 ms; bnbopt 3.77 s.
 
 PBQP 2
 NODES 25

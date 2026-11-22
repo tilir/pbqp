@@ -33,6 +33,7 @@ import :dsatur_diagnostics;
 import :interference;
 import :reduction;
 import :bnb_cover;
+import :bnb_bucket_seed;
 import :diagnostics;
 
 namespace pbqp {
@@ -311,6 +312,18 @@ template <typename Bounds> void BranchAndBoundSearch<Bounds>::prepare_plan() {
     bounds.describe_structure(diagnostics);
   if (prepare_capacity_bounds(lower) || deadline.expired())
     return;
+  if (optimizations.enabled(BnbOptimization::BucketSeed) && incumbent.found()) {
+    const bool interference =
+        bounds.interference_check().failure == InterferenceFailure::None;
+    BnbBucketSeed seed(bounds.input(), incumbent, lower, deadline);
+    seed.run(interference, diagnostics);
+    if (deadline.expired())
+      return;
+    if (!incumbent.can_improve(lower)) {
+      plan.covered_depths.push_back(0);
+      return;
+    }
+  }
   PrefixPlanner<Bounds> planner(bounds, incumbent, deadline);
   plan = planner.build(settings);
   diagnostics.line("search: planned jobs=", plan.tasks.size(),
