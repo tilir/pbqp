@@ -8,6 +8,8 @@ module;
 #include "pbqp.h"
 #include <algorithm>
 #include <memory>
+#include <string_view>
+#include <vector>
 module pbqp:bucket_api;
 import :bucket;
 import :bucket_plan;

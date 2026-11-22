@@ -7,6 +7,7 @@
 module;
 #include "pbqp.h"
 #include <memory>
+#include <vector>
 module pbqp:reduction_refine;
 import :bucket;
 import :bucket_plan;
